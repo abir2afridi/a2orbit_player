@@ -16,7 +16,7 @@ dependencies:
   
   # Video Player
   video_player: ^2.8.2
-  better_player: ^0.0.84
+  video_player: ^2.8.2
   
   # Audio & Background
   just_audio: ^0.9.36
@@ -47,6 +47,7 @@ dependencies:
   # Utilities
   uuid: ^4.2.1
   crypto: ^3.0.3
+  collection: ^1.18.0
 
 dev_dependencies:
   flutter_test:

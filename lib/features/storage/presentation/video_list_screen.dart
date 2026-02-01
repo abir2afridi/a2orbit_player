@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'dart:io';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path/path.dart' as p;
+
+import '../../../core/providers/app_providers.dart';
 import '../../../core/utils/app_utils.dart';
 import '../../player/presentation/video_player_widget.dart';
 
-class VideoListScreen extends StatefulWidget {
+class VideoListScreen extends ConsumerStatefulWidget {
   final String folderPath;
   final List<File> videos;
   final String folderName;
@@ -16,114 +20,108 @@ class VideoListScreen extends StatefulWidget {
   });
 
   @override
-  State<VideoListScreen> createState() => _VideoListScreenState();
+  ConsumerState<VideoListScreen> createState() => _VideoListScreenState();
 }
 
-class _VideoListScreenState extends State<VideoListScreen> {
+class _VideoListScreenState extends ConsumerState<VideoListScreen> {
   bool _isGridView = false;
   String _searchQuery = '';
   List<File> _filteredVideos = [];
+  late List<File> _allVideos;
+  bool _hasModified = false;
 
   @override
   void initState() {
     super.initState();
-    _filteredVideos = widget.videos;
+    _allVideos = List<File>.from(widget.videos);
+    _filteredVideos = _computeVisibleVideos('');
   }
 
   void _filterVideos(String query) {
-    setState(() {
-      _searchQuery = query;
-      if (query.isEmpty) {
-        _filteredVideos = widget.videos;
-      } else {
-        _filteredVideos = widget.videos.where((video) {
-          final fileName = AppUtils.getFileName(video.path).toLowerCase();
-          return fileName.contains(query.toLowerCase());
-        }).toList();
-      }
-    });
+    _rebuildFilteredVideos(query: query);
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          widget.folderName,
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+    return WillPopScope(
+      onWillPop: () async {
+        Navigator.of(context).pop(_hasModified);
+        return false;
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () => Navigator.of(context).pop(_hasModified),
+          ),
+          title: Text(
+            widget.folderName,
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+          ),
+          actions: [
+            IconButton(
+              onPressed: () {
+                setState(() {
+                  _isGridView = !_isGridView;
+                });
+              },
+              icon: Icon(_isGridView ? Icons.list : Icons.grid_view),
+              tooltip: _isGridView ? 'List View' : 'Grid View',
+            ),
+          ],
         ),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black87,
-        elevation: 0,
-        actions: [
-          IconButton(
-            onPressed: () {
-              setState(() {
-                _isGridView = !_isGridView;
-              });
-            },
-            icon: Icon(_isGridView ? Icons.list : Icons.grid_view),
-            tooltip: _isGridView ? 'List View' : 'Grid View',
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          // Search bar
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: TextField(
-              decoration: InputDecoration(
-                hintText: 'Search ${widget.videos.length} videos...',
-                prefixIcon: const Icon(Icons.search),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.grey[300]!),
+        body: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: TextField(
+                decoration: InputDecoration(
+                  hintText: 'Search ${_allVideos.length} videos...',
+                  prefixIcon: const Icon(Icons.search),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.grey[300]!),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Colors.blue),
+                  ),
                 ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: Colors.blue),
-                ),
+                onChanged: _filterVideos,
               ),
-              onChanged: _filterVideos,
             ),
-          ),
-
-          // Video count
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: Row(
-              children: [
-                Text(
-                  '${_filteredVideos.length} video${_filteredVideos.length != 1 ? 's' : ''}',
-                  style: TextStyle(
-                    color: Colors.grey[600],
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0),
+              child: Row(
+                children: [
+                  Text(
+                    '${_filteredVideos.length} video${_filteredVideos.length != 1 ? 's' : ''}',
+                    style: TextStyle(
+                      color: Colors.grey[600],
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
-                ),
-                if (_searchQuery.isNotEmpty) ...[
-                  const Spacer(),
-                  TextButton(
-                    onPressed: () => _filterVideos(''),
-                    child: const Text('Clear'),
-                  ),
+                  if (_searchQuery.isNotEmpty) ...[
+                    const Spacer(),
+                    TextButton(
+                      onPressed: () => _filterVideos(''),
+                      child: const Text('Clear'),
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
-          ),
-
-          const SizedBox(height: 8),
-
-          // Video list/grid
-          Expanded(
-            child: _filteredVideos.isEmpty
-                ? _buildEmptyState()
-                : _isGridView
-                ? _buildVideoGrid()
-                : _buildVideoList(),
-          ),
-        ],
+            const SizedBox(height: 8),
+            Expanded(
+              child: _filteredVideos.isEmpty
+                  ? _buildEmptyState()
+                  : _isGridView
+                  ? _buildVideoGrid()
+                  : _buildVideoList(),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -215,37 +213,23 @@ class _VideoListScreenState extends State<VideoListScreen> {
         ),
         trailing: PopupMenuButton<String>(
           icon: Icon(Icons.more_vert, color: Colors.grey[600]),
-          onSelected: (value) {
-            switch (value) {
-              case 'play':
-                _playVideo(video);
-                break;
-              case 'info':
-                _showVideoInfo(video);
-                break;
-            }
-          },
+          onSelected: (value) => _handleVideoAction(value, video),
           itemBuilder: (context) => [
-            const PopupMenuItem(
-              value: 'play',
-              child: Row(
-                children: [
-                  Icon(Icons.play_arrow),
-                  SizedBox(width: 8),
-                  Text('Play'),
-                ],
-              ),
+            _buildPopupMenuItem('play', Icons.play_arrow, 'Play'),
+            _buildPopupMenuItem('info', Icons.info_outline, 'Info'),
+            const PopupMenuDivider(),
+            _buildPopupMenuItem('hide', Icons.visibility_off_outlined, 'Hide'),
+            _buildPopupMenuItem(
+              'move_private',
+              Icons.folder_special_outlined,
+              'Move to Private',
             ),
-            const PopupMenuItem(
-              value: 'info',
-              child: Row(
-                children: [
-                  Icon(Icons.info_outline),
-                  SizedBox(width: 8),
-                  Text('Info'),
-                ],
-              ),
+            _buildPopupMenuItem(
+              'rename',
+              Icons.drive_file_rename_outline,
+              'Rename',
             ),
+            _buildPopupMenuItem('delete', Icons.delete_outline, 'Delete'),
           ],
         ),
         onTap: () => _playVideo(video),
@@ -266,7 +250,6 @@ class _VideoListScreenState extends State<VideoListScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Video thumbnail placeholder
             Expanded(
               flex: 3,
               child: Container(
@@ -284,7 +267,6 @@ class _VideoListScreenState extends State<VideoListScreen> {
                 ),
               ),
             ),
-            // Video info
             Expanded(
               flex: 2,
               child: Padding(
@@ -301,10 +283,57 @@ class _VideoListScreenState extends State<VideoListScreen> {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    const Spacer(),
-                    Text(
-                      fileSize,
-                      style: TextStyle(color: Colors.grey[600], fontSize: 10),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            fileSize,
+                            style: TextStyle(
+                              color: Colors.grey[600],
+                              fontSize: 10,
+                            ),
+                          ),
+                        ),
+                        PopupMenuButton<String>(
+                          icon: const Icon(Icons.more_vert, size: 18),
+                          onSelected: (value) =>
+                              _handleVideoAction(value, video),
+                          itemBuilder: (context) => [
+                            _buildPopupMenuItem(
+                              'play',
+                              Icons.play_arrow,
+                              'Play',
+                            ),
+                            _buildPopupMenuItem(
+                              'info',
+                              Icons.info_outline,
+                              'Info',
+                            ),
+                            const PopupMenuDivider(),
+                            _buildPopupMenuItem(
+                              'hide',
+                              Icons.visibility_off_outlined,
+                              'Hide',
+                            ),
+                            _buildPopupMenuItem(
+                              'move_private',
+                              Icons.folder_special_outlined,
+                              'Move to Private',
+                            ),
+                            _buildPopupMenuItem(
+                              'rename',
+                              Icons.drive_file_rename_outline,
+                              'Rename',
+                            ),
+                            _buildPopupMenuItem(
+                              'delete',
+                              Icons.delete_outline,
+                              'Delete',
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -381,5 +410,240 @@ class _VideoListScreenState extends State<VideoListScreen> {
         ],
       ),
     );
+  }
+
+  PopupMenuItem<String> _buildPopupMenuItem(
+    String value,
+    IconData icon,
+    String label,
+  ) {
+    return PopupMenuItem(
+      value: value,
+      child: Row(
+        children: [
+          Icon(icon, size: 20),
+          const SizedBox(width: 12),
+          Text(label),
+        ],
+      ),
+    );
+  }
+
+  void _rebuildFilteredVideos({String? query}) {
+    if (!mounted) return;
+    final newQuery = query ?? _searchQuery;
+    final visible = _computeVisibleVideos(newQuery);
+    setState(() {
+      _searchQuery = newQuery;
+      _filteredVideos = visible;
+    });
+  }
+
+  List<File> _computeVisibleVideos(String query) {
+    final hiddenPaths = ref
+        .read(privacyServiceProvider)
+        .getHiddenVideos()
+        .toSet();
+    final lowerQuery = query.toLowerCase();
+    return _allVideos.where((video) {
+      if (hiddenPaths.contains(video.path)) {
+        return false;
+      }
+      if (lowerQuery.isEmpty) {
+        return true;
+      }
+      final fileName = AppUtils.getFileName(video.path).toLowerCase();
+      return fileName.contains(lowerQuery);
+    }).toList();
+  }
+
+  Future<void> _handleVideoAction(String action, File video) async {
+    switch (action) {
+      case 'play':
+        _playVideo(video);
+        break;
+      case 'info':
+        _showVideoInfo(video);
+        break;
+      case 'hide':
+        await _hideVideo(video);
+        break;
+      case 'move_private':
+        await _moveToPrivate(video);
+        break;
+      case 'rename':
+        await _renameVideo(video);
+        break;
+      case 'delete':
+        await _deleteVideo(video);
+        break;
+    }
+  }
+
+  Future<void> _hideVideo(File video) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref.read(privacyServiceProvider).hideVideo(video.path);
+      if (!mounted) return;
+      _hasModified = true;
+      _rebuildFilteredVideos();
+      messenger.showSnackBar(
+        SnackBar(content: Text('${AppUtils.getFileName(video.path)} hidden')),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Failed to hide video: $e')),
+      );
+    }
+  }
+
+  Future<void> _moveToPrivate(File video) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref.read(privacyServiceProvider).moveToPrivateFolder(video);
+      if (!mounted) return;
+      _allVideos.removeWhere((v) => v.path == video.path);
+      _hasModified = true;
+      _rebuildFilteredVideos();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            '${AppUtils.getFileName(video.path)} moved to private folder',
+          ),
+        ),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Failed to move to private folder: $e')),
+      );
+    }
+  }
+
+  Future<void> _renameVideo(File video) async {
+    final initialName = p.basenameWithoutExtension(video.path);
+    final controller = TextEditingController(text: initialName);
+    String? errorText;
+
+    final confirmed = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            return AlertDialog(
+              title: const Text('Rename Video'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: controller,
+                    autofocus: true,
+                    decoration: InputDecoration(
+                      labelText: 'File name',
+                      suffixText: p.extension(video.path),
+                      errorText: errorText,
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(null),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    final newName = controller.text.trim();
+                    if (newName.isEmpty) {
+                      setStateDialog(() {
+                        errorText = 'Name cannot be empty';
+                      });
+                      return;
+                    }
+                    Navigator.of(context).pop(newName);
+                  },
+                  child: const Text('Save'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (confirmed == null || confirmed == initialName) {
+      return;
+    }
+
+    final messenger = ScaffoldMessenger.of(context);
+    final directory = video.parent;
+    final extension = p.extension(video.path);
+    final newPath = p.join(directory.path, '$confirmed$extension');
+
+    if (await File(newPath).exists()) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('A file named $confirmed already exists')),
+      );
+      return;
+    }
+
+    try {
+      final renamedFile = await video.rename(newPath);
+      final index = _allVideos.indexWhere((v) => v.path == video.path);
+      if (index != -1) {
+        _allVideos[index] = renamedFile;
+      }
+      if (!mounted) return;
+      _hasModified = true;
+      _rebuildFilteredVideos();
+      messenger.showSnackBar(
+        SnackBar(content: Text('Renamed to ${p.basename(renamedFile.path)}')),
+      );
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Failed to rename: $e')));
+    }
+  }
+
+  Future<void> _deleteVideo(File video) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Video'),
+        content: Text(
+          'Delete ${AppUtils.getFileName(video.path)}? This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) {
+      return;
+    }
+
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await video.delete();
+      await ref.read(privacyServiceProvider).unhideVideo(video.path);
+      _allVideos.removeWhere((v) => v.path == video.path);
+      if (!mounted) return;
+      _hasModified = true;
+      _rebuildFilteredVideos();
+      messenger.showSnackBar(
+        SnackBar(content: Text('Deleted ${AppUtils.getFileName(video.path)}')),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Failed to delete video: $e')),
+      );
+    }
   }
 }
