@@ -1,19 +1,58 @@
 name: a2orbit_player
-description: "A new Flutter project."
+description: "A professional offline video and audio player for Android"
 publish_to: 'none'
-version: 0.1.0
+version: 1.0.0+1
 
 environment:
   sdk: ^3.10.7
+  flutter: ">=3.10.0"
 
 dependencies:
   flutter:
     sdk: flutter
+  
+  # State Management
+  flutter_riverpod: ^2.4.9
+  
+  # Video Player
+  video_player: ^2.8.2
+  
+  # Audio & Background
+  just_audio: ^0.9.36
+  
+  # File Management
+  permission_handler: ^11.1.0
+  path_provider: ^2.1.1
+  path: ^1.8.3
+  
+  # Storage & Database
+  shared_preferences: ^2.2.2
+  sqflite: ^2.3.0
+  
+  # UI & Theme
+  cupertino_icons: ^1.0.2
+  google_fonts: ^6.1.0
+  
+  # Security
+  local_auth: ^2.1.8
+  
+  # System
+  wakelock_plus: ^1.1.4
+  device_info_plus: ^9.1.1
+  
+  # Utilities
+  uuid: ^4.2.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  riverpod_generator: ^2.3.9
+  build_runner: ^2.4.7
 
 flutter:
   uses-material-design: true
+  
+  assets:
+    - assets/images/
+    - assets/icons/
