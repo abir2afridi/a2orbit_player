@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../../storage/presentation/file_browser_screen.dart';
 import '../../settings/presentation/settings_screen.dart';
+import 'me_screen.dart';
+import 'music_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -10,109 +13,128 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  int _currentIndex = 1; // Default to Folders
+  int _currentIndex = 0; // Default to Local/Folders
   bool _isSearching = false;
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
 
   @override
   Widget build(BuildContext context) {
+    // Hide default AppBar for Music (index 1) and Me (index 3)
+    final bool hideDefaultAppBar = _currentIndex == 1 || _currentIndex == 3;
+
     return Scaffold(
       backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        title: _isSearching
-            ? TextField(
-                controller: _searchController,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  hintText: 'Search videos...',
-                  border: InputBorder.none,
+      appBar: hideDefaultAppBar
+          ? null
+          : AppBar(
+              backgroundColor: Colors.white,
+              elevation: 0,
+              title: _isSearching
+                  ? TextField(
+                      controller: _searchController,
+                      autofocus: true,
+                      decoration: const InputDecoration(
+                        hintText: 'Search videos...',
+                        border: InputBorder.none,
+                      ),
+                      onChanged: (value) {
+                        setState(() {
+                          _searchQuery = value;
+                        });
+                      },
+                    )
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'A2Orbit Player',
+                          style: GoogleFonts.raleway(
+                            color: Colors.black,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 22,
+                          ),
+                        ),
+                        Text(
+                          _currentIndex == 0 ? 'Local' : 'Transfer',
+                          style: const TextStyle(
+                            color: Colors.black54,
+                            fontWeight: FontWeight.normal,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+              actions: [
+                IconButton(
+                  onPressed: () {},
+                  icon: const Icon(Icons.cast, color: Colors.black54),
                 ),
-                onChanged: (value) {
-                  setState(() {
-                    _searchQuery = value;
-                  });
-                },
-              )
-            : const Text(
-                'Folders',
-                style: TextStyle(
-                  color: Colors.black,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 22,
+                IconButton(
+                  onPressed: () {
+                    setState(() {
+                      _isSearching = !_isSearching;
+                      if (!_isSearching) {
+                        _searchQuery = '';
+                        _searchController.clear();
+                      }
+                    });
+                  },
+                  icon: Icon(
+                    _isSearching ? Icons.close : Icons.search,
+                    color: Colors.black54,
+                  ),
                 ),
-              ),
-        actions: [
-          IconButton(
-            onPressed: () {},
-            icon: const Icon(Icons.cast, color: Colors.black54),
-          ),
-          IconButton(
-            onPressed: () {
-              setState(() {
-                _isSearching = !_isSearching;
-                if (!_isSearching) {
-                  _searchQuery = '';
-                  _searchController.clear();
-                }
-              });
-            },
-            icon: Icon(
-              _isSearching ? Icons.close : Icons.search,
-              color: Colors.black54,
-            ),
-          ),
-          IconButton(
-            onPressed: () {
-              // Toggle grid view in file browser
-              setState(() {
-                // This will be passed to FileBrowserScreen
-              });
-            },
-            icon: const Icon(Icons.grid_view, color: Colors.black54),
-            tooltip: 'Toggle Grid View',
-          ),
-          IconButton(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const SettingsScreen()),
-              );
-            },
-            icon: const Icon(Icons.person_outline, color: Colors.black54),
-          ),
-        ],
-      ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Quick Action Chips
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Row(
-              children: [
-                _buildQuickChip(Icons.music_note, 'Music'),
-                _buildQuickChip(Icons.lock_outline, 'Privacy'),
-                _buildQuickChip(Icons.share_outlined, 'Share'),
-                _buildQuickChip(
-                  Icons.download_for_offline_outlined,
-                  'Downloads',
+                IconButton(
+                  onPressed: () {
+                    // Toggle grid view logic
+                  },
+                  icon: const Icon(Icons.grid_view, color: Colors.black54),
+                  tooltip: 'Toggle Grid View',
+                ),
+                IconButton(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const SettingsScreen(),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.person_outline, color: Colors.black54),
                 ),
               ],
             ),
-          ),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Quick Action Chips (hidden on Music and Me tabs)
+          if (!hideDefaultAppBar)
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  _buildQuickChip(Icons.music_note, 'Music'),
+                  _buildQuickChip(Icons.lock_outline, 'Privacy'),
+                  _buildQuickChip(Icons.share_outlined, 'Share'),
+                  _buildQuickChip(
+                    Icons.download_for_offline_outlined,
+                    'Downloads',
+                  ),
+                ],
+              ),
+            ),
 
           Expanded(
             child: IndexedStack(
               index: _currentIndex,
               children: [
-                const Center(child: Text('Local Videos')),
                 FileBrowserScreen(isEmbedded: true, searchQuery: _searchQuery),
-                const Center(child: Text('Music Screen')),
-                const Center(child: Text('Settings Screen')),
+                const MusicScreen(),
+                const Center(child: Text('Transfer Screen')),
+                const MeScreen(),
               ],
             ),
           ),
@@ -128,22 +150,28 @@ class _HomeScreenState extends State<HomeScreen> {
         onTap: (index) {
           setState(() {
             _currentIndex = index;
+            _isSearching = false;
+            _searchQuery = '';
+            _searchController.clear();
           });
         },
         items: const [
           BottomNavigationBarItem(
-            icon: Icon(Icons.play_circle_outline),
-            label: 'Local',
-          ),
-          BottomNavigationBarItem(
             icon: Icon(Icons.folder_open),
-            label: 'Folders',
+            label: 'Local',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.music_note_outlined),
             label: 'Music',
           ),
-          BottomNavigationBarItem(icon: Icon(Icons.menu), label: 'Me'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.swap_horiz),
+            label: 'Transfer',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.person_outline),
+            label: 'Me',
+          ),
         ],
       ),
     );

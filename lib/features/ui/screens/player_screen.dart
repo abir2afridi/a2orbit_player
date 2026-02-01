@@ -8,11 +8,6 @@ class PlayerScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return VideoPlayerWidget(
-      videoPath: videoPath,
-      onVideoEnd: () {
-        Navigator.pop(context);
-      },
-    );
+    return VideoPlayerWidget(videoPath: videoPath);
   }
 }

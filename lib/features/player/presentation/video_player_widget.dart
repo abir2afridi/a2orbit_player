@@ -2,23 +2,15 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
-import 'package:audio_session/audio_session.dart';
-import 'package:better_player/better_player.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:screen_brightness/screen_brightness.dart';
-import 'package:volume_controller/volume_controller.dart';
-import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../../core/providers/app_providers.dart';
 import '../services/playback_history_service.dart';
+import 'native_player_controller.dart';
 
 class VideoPlayerWidget extends ConsumerStatefulWidget {
-  final String videoPath;
-  final bool autoPlay;
-  final VoidCallback? onVideoEnd;
-
   const VideoPlayerWidget({
     super.key,
     required this.videoPath,
@@ -26,68 +18,59 @@ class VideoPlayerWidget extends ConsumerStatefulWidget {
     this.onVideoEnd,
   });
 
+  final String videoPath;
+  final bool autoPlay;
+  final VoidCallback? onVideoEnd;
+
   @override
   ConsumerState<VideoPlayerWidget> createState() => _VideoPlayerWidgetState();
 }
 
 class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
     with WidgetsBindingObserver {
-  BetterPlayerController? _controller;
-  BetterPlayerDataSource? _dataSource;
-  bool _isControlsVisible = true;
-  bool _isLocked = false;
+  final NativePlayerController _nativeController = NativePlayerController();
+  StreamSubscription<NativePlayerEvent>? _eventSubscription;
+  ProviderSubscription<AppSettings>? _settingsSubscription;
+  late PlaybackHistoryService _historyService;
+
+  bool _isPlayerReady = false;
   bool _isLoading = true;
   bool _hasError = false;
+  bool _showControls = true;
+  bool _isLocked = false;
+  bool _isBuffering = false;
+  bool _isAudioOnly = false;
+
   String? _errorMessage;
 
-  late PlaybackHistoryService _historyService;
-  Duration _currentPosition = Duration.zero;
-  Duration _totalDuration = Duration.zero;
+  Duration _position = Duration.zero;
+  Duration _duration = Duration.zero;
+  Duration? _resumePosition;
+  Duration _subtitleDelay = Duration.zero;
+  Duration _audioDelay = Duration.zero;
+
+  bool _isPlaying = false;
+
+  AppSettings? _settings;
 
   Timer? _hideControlsTimer;
   Timer? _progressSaveTimer;
   Timer? _sleepTimer;
 
-  double _gestureDeltaSeconds = 0;
-  bool _isSeekingGesture = false;
-  bool _isBrightnessGesture = false;
-  bool _isVolumeGesture = false;
-  bool _isLeftSideGesture = false;
-  double _initialBrightness = 0.5;
-  double _initialVolume = 0.5;
-  double _currentBrightness = 0.5;
-  double _currentVolume = 0.5;
-  double _subtitleDelayMs = 0;
-  double _audioDelayMs = 0;
-
-  Duration? _abStart;
-  Duration? _abEnd;
-
-  bool _sleepTimerExpired = false;
-  BackgroundPlayOption _backgroundOption = BackgroundPlayOption.stop;
-  late AppSettings _settings;
-  bool _autoEnterPip = true;
-  bool _allowGestureSeek = true;
-  bool _allowGestureBrightness = true;
-  bool _allowGestureVolume = true;
-  bool _showGestureHints = true;
-  bool _oneHandMode = false;
-  bool _audioOnly = false;
-  bool _volumeBoostEnabled = false;
-  double _volumeBoostFactor = 1.0;
-
-  final VolumeController _volumeController = VolumeController();
-  final ScreenBrightness _screenBrightness = ScreenBrightness.instance;
-  ProviderSubscription<AppSettings>? _settingsSubscription;
-
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+
     final prefs = ref.read(sharedPreferencesProvider);
     _historyService = PlaybackHistoryService(prefs);
     _settings = ref.read(settingsProvider);
-    _applySettings(_settings);
+    _applySettings(_settings!);
+    _loadResumePosition();
+
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+
+    _eventSubscription = _nativeController.events.listen(_handleNativeEvent);
     _settingsSubscription = ref.listenManual<AppSettings>(settingsProvider, (
       previous,
       next,
@@ -95,7 +78,6 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
       if (!mounted) return;
       _onSettingsChanged(previous, next);
     });
-    _initializePlayer();
   }
 
   @override
@@ -104,699 +86,563 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
     _hideControlsTimer?.cancel();
     _progressSaveTimer?.cancel();
     _sleepTimer?.cancel();
-    _controller?.dispose();
-    _volumeController.removeListener(_onSystemVolumeChanged);
-    WakelockPlus.disable();
+    _eventSubscription?.cancel();
     _settingsSubscription?.close();
+    _nativeController.dispose();
+    SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    final controller = _controller;
-    if (controller == null) return;
-
     switch (state) {
+      case AppLifecycleState.resumed:
+        _handleBackgroundBehavior(isPaused: false);
+        break;
       case AppLifecycleState.inactive:
       case AppLifecycleState.paused:
         _handleBackgroundBehavior(isPaused: true);
         break;
-      case AppLifecycleState.resumed:
-        _handleBackgroundBehavior(isPaused: false);
-        break;
-      case AppLifecycleState.hidden:
       case AppLifecycleState.detached:
+      case AppLifecycleState.hidden:
         break;
     }
   }
 
-  Future<void> _initializePlayer() async {
+  @override
+  void didUpdateWidget(covariant VideoPlayerWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.videoPath != widget.videoPath) {
+      _resetStateForNewSource();
+    }
+  }
+
+  Future<void> _loadResumePosition() async {
+    final resume = await _historyService.getPosition(widget.videoPath);
+    if (!mounted) return;
     setState(() {
-      _isLoading = true;
-      _hasError = false;
+      _resumePosition = resume;
     });
+  }
 
-    final settings = _settings;
-    _backgroundOption = settings.backgroundPlayOption;
+  void _resetStateForNewSource() {
+    _hideControlsTimer?.cancel();
+    _progressSaveTimer?.cancel();
+    _sleepTimer?.cancel();
+    _resumePosition = null;
+    _position = Duration.zero;
+    _duration = Duration.zero;
+    _subtitleDelay = Duration.zero;
+    _audioDelay = Duration.zero;
+    _isPlayerReady = false;
+    _isPlaying = false;
+    _hasError = false;
+    _errorMessage = null;
+    _isBuffering = false;
+    _loadResumePosition();
+  }
 
-    try {
-      await _configureAudioSession();
-      await _initializeBrightnessAndVolume();
+  void _onSettingsChanged(AppSettings? previous, AppSettings next) {
+    final prev = previous ?? _settings;
+    _applySettings(next);
+    if (_isPlayerReady) {
+      _applyNativePreferences();
+    }
+    if (prev?.sleepTimerMinutes != next.sleepTimerMinutes) {
+      _configureSleepTimer(next);
+    }
+  }
 
-      final subtitles = await _loadSubtitlesFromDirectory();
-      _dataSource = BetterPlayerDataSource(
-        BetterPlayerDataSourceType.file,
-        widget.videoPath,
-        subtitles: subtitles,
-        notificationConfiguration: BetterPlayerNotificationConfiguration(
-          showNotification:
-              settings.backgroundPlayOption != BackgroundPlayOption.stop,
-          activityName: "MainActivity",
-        ),
-        useAsmsSubtitles: true,
-      );
+  void _applySettings(AppSettings settings) {
+    _settings = settings;
+    _isAudioOnly = settings.audioOnly;
+    _updateOrientationPreference(settings.autoRotate);
+  }
 
-      final configuration = BetterPlayerConfiguration(
-        autoPlay: widget.autoPlay,
-        looping: false,
-        allowedScreenSleep: !settings.keepScreenOn,
-        handleLifecycle: true,
-        fit: BoxFit.contain,
-        subtitlesConfiguration: BetterPlayerSubtitlesConfiguration(
-          fontSize: settings.subtitleFontSize,
-          fontColor: Color(settings.subtitleTextColor),
-          outlineColor: Colors.black,
-          outlineSize: 2.0,
-          shadowColor: Colors.black54,
-          backgroundColor: Colors.black.withOpacity(
-            settings.subtitleBackgroundOpacity,
-          ),
-        ),
-        controlsConfiguration: const BetterPlayerControlsConfiguration(
-          showControls: false,
-        ),
-        deviceOrientationsOnFullScreen: const [
-          DeviceOrientation.landscapeLeft,
-          DeviceOrientation.landscapeRight,
-        ],
-        autoDetectFullscreenAspectRatio: true,
-        autoDetectFullscreenDeviceOrientation: true,
-        aspectRatio: await _calculateAspectRatio(),
-        eventListener: _handlePlayerEvent,
-      );
+  void _updateOrientationPreference(bool autoRotate) {
+    final orientations = autoRotate
+        ? DeviceOrientation.values
+        : const [DeviceOrientation.portraitUp];
+    SystemChrome.setPreferredOrientations(orientations);
+  }
 
-      final controller = BetterPlayerController(
-        configuration,
-        betterPlayerDataSource: _dataSource,
-      );
-
-      _controller = controller;
-      await controller.preCache(_dataSource!);
-
-      controller.addEventsListener(_handlePlayerEvent);
-      controller.addListener(_onControllerUpdate);
-
-      if (settings.resumePlayback) {
-        final resumePosition = await _historyService.getPosition(
-          widget.videoPath,
-        );
-        if (resumePosition != null && resumePosition < _totalDuration) {
-          controller.seekTo(resumePosition);
-        }
-      }
-
-      _startProgressSaveTimer();
-      _configureSleepTimer(settings);
-      _ensureWakelock(settings.keepScreenOn);
-
-      _volumeController.addListener(_onSystemVolumeChanged);
-
+  void _handleNativeEvent(NativePlayerEvent event) {
+    if (!mounted) return;
+    if (event is NativePlaybackStateEvent) {
       setState(() {
-        _isLoading = false;
+        _isPlaying = event.isPlaying && !event.isEnded;
+        _isBuffering = event.isBuffering;
+        if (event.isEnded) {
+          _historyService.clearPosition(widget.videoPath);
+          widget.onVideoEnd?.call();
+          _showControls = true;
+        }
       });
-    } catch (e) {
+    } else if (event is NativePositionEvent) {
+      setState(() {
+        _position = event.position;
+        _duration = event.duration;
+      });
+    } else if (event is NativeErrorEvent) {
       setState(() {
         _hasError = true;
+        _isLoading = false;
+        _errorMessage = '${event.code}: ${event.message}';
+      });
+    }
+  }
+
+  Future<void> _onPlatformViewCreated(int viewId) async {
+    _nativeController.attach(viewId);
+    try {
+      final subtitles = await _loadSubtitlePaths();
+      await _nativeController.setSource(widget.videoPath, subtitles: subtitles);
+
+      if (_resumePosition != null && _resumePosition! > Duration.zero) {
+        await _nativeController.seekTo(_resumePosition!);
+      }
+
+      await _applyNativePreferences();
+
+      if (widget.autoPlay) {
+        await _nativeController.play();
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _isPlayerReady = true;
+        _isLoading = false;
+        _hasError = false;
+      });
+
+      _startProgressSaveTimer();
+      _configureSleepTimer(_settings);
+      _restartHideControlsTimer();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _hasError = true;
+        _isLoading = false;
         _errorMessage = 'Failed to initialize player: $e';
       });
     }
   }
 
-  Future<void> _configureAudioSession() async {
-    final session = await AudioSession.instance;
-    await session.configure(const AudioSessionConfiguration.music());
-    session.becomingNoisyEventStream.listen((_) {
-      if (!mounted) return;
-      if (!_settings.enableScreenOffPlayback) {
-        _controller?.pause();
-      }
-    });
-    session.interruptionEventStream.listen((event) {
-      if (!mounted) return;
-      if (event.begin) {
-        _controller?.pause();
-      } else {
-        if (_backgroundOption != BackgroundPlayOption.stop) {
-          _controller?.play();
-        }
-      }
-    });
-  }
+  Future<void> _applyNativePreferences() async {
+    final settings = _settings;
+    if (settings == null) return;
 
-  Future<void> _initializeBrightnessAndVolume() async {
-    try {
-      _initialBrightness = await _screenBrightness.current;
-      _currentBrightness = _initialBrightness;
-    } catch (_) {
-      _initialBrightness = 0.5;
-    }
+    await _nativeController.setPlaybackSpeed(settings.playbackSpeed);
+    await _nativeController.setAutoPiPEnabled(settings.autoEnterPip);
+    await _nativeController.setGesturesEnabled(
+      settings.enableGestureSeek ||
+          settings.enableGestureVolume ||
+          settings.enableGestureBrightness,
+    );
 
-    try {
-      _initialVolume = await _volumeController.getVolume();
-      _currentVolume = _initialVolume;
-    } catch (_) {
-      _initialVolume = 0.5;
-    }
-  }
-
-  void _configureSleepTimer(AppSettings settings) {
-    _sleepTimer?.cancel();
-    if (settings.sleepTimerMinutes > 0) {
-      _sleepTimer = Timer(Duration(minutes: settings.sleepTimerMinutes), () {
-        _sleepTimerExpired = true;
-        _controller?.pause();
-        if (mounted) {
-          setState(() {});
-        }
-      });
-    }
-  }
-
-  Future<double> _calculateAspectRatio() async {
-    try {
-      final file = File(widget.videoPath);
-      if (!await file.exists()) return 16 / 9;
-    } catch (_) {}
-    return 16 / 9;
-  }
-
-  Future<List<BetterPlayerSubtitlesSource>>
-  _loadSubtitlesFromDirectory() async {
-    final file = File(widget.videoPath);
-    final directory = file.parent;
-    if (!await directory.exists()) {
-      return [];
-    }
-
-    final subtitleFiles =
-        directory
-            .listSync()
-            .whereType<File>()
-            .where((f) => _isSubtitleFile(f.path))
-            .toList()
-          ..sort((a, b) => a.path.compareTo(b.path));
-
-    return subtitleFiles
-        .map(
-          (file) => BetterPlayerSubtitlesSource(
-            type: BetterPlayerSubtitlesSourceType.file,
-            urls: [file.path],
-            name: file.uri.pathSegments.last,
-          ),
-        )
-        .toList();
-  }
-
-  bool _isSubtitleFile(String path) {
-    final lower = path.toLowerCase();
-    return lower.endsWith('.srt') ||
-        lower.endsWith('.ass') ||
-        lower.endsWith('.ssa');
-  }
-
-  void _handlePlayerEvent(BetterPlayerEvent event) {
-    if (!mounted) return;
-    switch (event.betterPlayerEventType) {
-      case BetterPlayerEventType.exception:
-      case BetterPlayerEventType.playerError:
-        setState(() {
-          _hasError = true;
-          _errorMessage =
-              event.parameters?[BetterPlayerParameterNames.error] ??
-              'Unknown playback error';
-        });
-        break;
-      case BetterPlayerEventType.finished:
-        if (_abStart != null && _abEnd != null) {
-          _controller?.seekTo(_abStart!);
-          _controller?.play();
-        } else {
-          widget.onVideoEnd?.call();
-        }
-        break;
-      case BetterPlayerEventType.initialized:
-        setState(() {
-          _totalDuration =
-              _controller?.videoPlayerController.value.duration ??
-              Duration.zero;
-        });
-        break;
-      case BetterPlayerEventType.progress:
-        final position = event.parameters?['progress'] as Duration?;
-        if (position != null) {
-          setState(() {
-            _currentPosition = position;
-          });
-          _applyABRepeat(position);
-        }
-        break;
-      default:
-        break;
-    }
-  }
-
-  void _onControllerUpdate() {
-    if (!mounted) return;
-    final controller = _controller;
-    if (controller == null) return;
-    final videoController = controller.videoPlayerController;
-    if (videoController == null || !videoController.value.isInitialized) {
-      return;
-    }
-
-    final duration = videoController.value.duration;
-    final position = videoController.value.position;
-
-    if (_totalDuration != duration) {
-      setState(() {
-        _totalDuration = duration;
-      });
-    }
-    if (_currentPosition != position) {
-      setState(() {
-        _currentPosition = position;
-      });
-      _applyABRepeat(position);
-    }
-  }
-
-  void _applyABRepeat(Duration position) {
-    if (_abStart == null || _abEnd == null) return;
-    if (position >= _abEnd!) {
-      _controller?.seekTo(_abStart!);
-    }
+    await _nativeController.setDecoder(
+      settings.enableHardwareAcceleration
+          ? DecoderType.hardware
+          : DecoderType.software,
+    );
   }
 
   void _handleBackgroundBehavior({required bool isPaused}) {
-    if (!mounted) return;
-    final controller = _controller;
-    if (controller == null) return;
+    final settings = _settings;
+    if (settings == null) return;
 
-    switch (_backgroundOption) {
-      case BackgroundPlayOption.stop:
-        if (isPaused) {
-          controller.pause();
-        }
-        break;
-      case BackgroundPlayOption.backgroundAudio:
-        if (isPaused) {
-          controller.setControlsVisibility(false);
-        } else {
-          controller.play();
-        }
-        break;
-      case BackgroundPlayOption.pictureInPicture:
-        if (isPaused && _autoEnterPip) {
-          _enterPictureInPicture();
-        }
-        break;
+    if (isPaused) {
+      switch (settings.backgroundPlayOption) {
+        case BackgroundPlayOption.stop:
+          _nativeController.pause();
+          break;
+        case BackgroundPlayOption.backgroundAudio:
+          // allow playback to continue in background
+          break;
+        case BackgroundPlayOption.pictureInPicture:
+          if (settings.autoEnterPip) {
+            _nativeController.enterPictureInPicture();
+          }
+          break;
+      }
+    } else {
+      if (widget.autoPlay && !_isPlaying) {
+        _nativeController.play();
+      }
     }
   }
 
-  Future<void> _enterPictureInPicture() async {
-    try {
-      await _controller?.enablePictureInPicture(
-        aspectRatio: const Ratio(16, 9),
+  void _startProgressSaveTimer() {
+    _progressSaveTimer?.cancel();
+    _progressSaveTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
+      if (!_isPlayerReady || !_isPlaying) return;
+      await _historyService.savePosition(widget.videoPath, _position);
+    });
+  }
+
+  void _configureSleepTimer(AppSettings? settings) {
+    final targetSettings = settings ?? _settings;
+    if (targetSettings == null) return;
+    _sleepTimer?.cancel();
+    if (targetSettings.sleepTimerMinutes > 0) {
+      _sleepTimer = Timer(
+        Duration(minutes: targetSettings.sleepTimerMinutes),
+        () async {
+          await _nativeController.pause();
+          if (!mounted) return;
+          setState(() {
+            _isPlaying = false;
+            _showControls = true;
+          });
+        },
       );
-    } catch (e) {
-      debugPrint('Failed to enter PiP: $e');
     }
+  }
+
+  void _restartHideControlsTimer() {
+    _hideControlsTimer?.cancel();
+    if (!_showControls || _isLocked) return;
+    _hideControlsTimer = Timer(const Duration(seconds: 4), () {
+      if (!mounted) return;
+      setState(() {
+        _showControls = false;
+      });
+    });
   }
 
   void _toggleControls() {
     if (_isLocked) return;
     setState(() {
-      _isControlsVisible = !_isControlsVisible;
+      _showControls = !_showControls;
     });
-    _restartHideControlsTimer();
-  }
-
-  void _restartHideControlsTimer() {
-    _hideControlsTimer?.cancel();
-    if (!_isControlsVisible) return;
-    _hideControlsTimer = Timer(const Duration(seconds: 4), () {
-      if (!mounted) return;
-      setState(() {
-        _isControlsVisible = false;
-      });
-    });
-  }
-
-  void _startProgressSaveTimer() {
-    _progressSaveTimer?.cancel();
-    _progressSaveTimer = Timer.periodic(const Duration(seconds: 10), (_) {
-      _historyService.savePosition(widget.videoPath, _currentPosition);
-    });
-  }
-
-  void _onSystemVolumeChanged() async {
-    final volume = await _volumeController.getVolume();
-    final effective = _volumeBoostEnabled
-        ? (volume * _volumeBoostFactor).clamp(0.0, 1.0)
-        : volume;
-    _controller?.setVolume(effective);
-    setState(() {
-      _currentVolume = volume;
-    });
-  }
-
-  void _onHorizontalDragUpdate(DragUpdateDetails details) {
-    if (_isLocked || !_allowGestureSeek) return;
-    setState(() {
-      _isSeekingGesture = true;
-      _gestureDeltaSeconds += details.delta.dx * 0.2;
-    });
-  }
-
-  void _onHorizontalDragEnd(DragEndDetails details) {
-    if (_isLocked || !_allowGestureSeek) return;
-    final controller = _controller;
-    if (controller == null) return;
-    final seekDiff = Duration(seconds: _gestureDeltaSeconds.round());
-    final target = _currentPosition + seekDiff;
-    controller.seekTo(target.clamp(Duration.zero, _totalDuration));
-    setState(() {
-      _isSeekingGesture = false;
-      _gestureDeltaSeconds = 0;
-    });
-  }
-
-  void _onVerticalDragStart(DragStartDetails details, bool isLeftSide) {
-    if (_isLocked) return;
-    if (isLeftSide && !_allowGestureBrightness) return;
-    if (!isLeftSide && !_allowGestureVolume) return;
-    _isLeftSideGesture = isLeftSide;
-    if (isLeftSide) {
-      _isBrightnessGesture = true;
-    } else {
-      _isVolumeGesture = true;
+    if (_showControls) {
+      _restartHideControlsTimer();
     }
-  }
-
-  void _onVerticalDragUpdate(DragUpdateDetails details) {
-    if (_isLocked) return;
-    if (_isBrightnessGesture && _allowGestureBrightness) {
-      final value = (_currentBrightness - details.delta.dy * 0.005).clamp(
-        0.0,
-        1.0,
-      );
-      _screenBrightness.setScreenBrightness(value);
-      setState(() {
-        _currentBrightness = value;
-      });
-    } else if (_isVolumeGesture && _allowGestureVolume) {
-      final value = (_currentVolume - details.delta.dy * 0.005).clamp(0.0, 1.0);
-      _volumeController.setVolume(value);
-      final effective = _volumeBoostEnabled
-          ? (value * _volumeBoostFactor).clamp(0.0, 1.0)
-          : value;
-      _controller?.setVolume(effective);
-      setState(() {
-        _currentVolume = value;
-      });
-    }
-  }
-
-  void _onVerticalDragEnd(DragEndDetails details) {
-    setState(() {
-      _isBrightnessGesture = false;
-      _isVolumeGesture = false;
-    });
-  }
-
-  void _onDoubleTap(bool isRightSide) {
-    final controller = _controller;
-    if (controller == null || !_allowGestureSeek) return;
-    final seekOffsetMs = ref.read(settingsProvider).seekDuration;
-    final offset = Duration(milliseconds: seekOffsetMs);
-    final target = isRightSide
-        ? _currentPosition + offset
-        : _currentPosition - offset;
-    controller.seekTo(target.clamp(Duration.zero, _totalDuration));
   }
 
   void _toggleLock() {
     setState(() {
       _isLocked = !_isLocked;
-      _isControlsVisible = !_isLocked;
+      if (_isLocked) {
+        _showControls = false;
+      } else {
+        _showControls = true;
+        _restartHideControlsTimer();
+      }
     });
-    if (!_isLocked) {
-      _restartHideControlsTimer();
-    }
   }
 
   void _togglePlayPause() {
-    final controller = _controller;
-    if (controller == null) return;
-    if (controller.isPlaying() ?? false) {
-      controller.pause();
+    if (_isPlaying) {
+      _nativeController.pause();
     } else {
-      controller.play();
+      _nativeController.play();
     }
     _restartHideControlsTimer();
   }
 
-  void _setPlaybackSpeed() async {
-    final controller = _controller;
-    if (controller == null) return;
-    final speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5];
-    final currentSpeed = controller.videoPlayerController.value.playbackSpeed;
+  void _seekRelative(Duration delta) {
+    final target = _position + delta;
+    final totalMs = _duration > Duration.zero
+        ? _duration.inMilliseconds
+        : math.max(
+            math.max(_position.inMilliseconds, target.inMilliseconds),
+            0,
+          );
+    var clampedMs = target.inMilliseconds;
+    if (clampedMs < 0) {
+      clampedMs = 0;
+    } else if (totalMs > 0 && clampedMs > totalMs) {
+      clampedMs = totalMs;
+    }
+    _nativeController.seekTo(Duration(milliseconds: clampedMs));
+  }
+
+  void _handleDoubleTap(double tapX, double width) {
+    final isLeft = tapX < width / 2;
+    final settings = _settings;
+    if (settings == null) return;
+    final jump = Duration(milliseconds: settings.seekDuration);
+    _seekRelative(isLeft ? -jump : jump);
+  }
+
+  Future<void> _showSpeedSheet() async {
+    const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5];
+    final current = _settings?.playbackSpeed ?? 1.0;
     final result = await showModalBottomSheet<double>(
       context: context,
-      builder: (context) => _buildSimpleSheet<double>(
-        title: 'Playback Speed',
-        values: speeds,
-        currentValue: currentSpeed,
-        formatter: (v) => '${v.toStringAsFixed(2)}x',
+      builder: (context) => _OptionSheet<double>(
+        title: 'Playback speed',
+        options: speeds,
+        formatter: (value) => '${value.toStringAsFixed(2)}x',
+        selected: current,
       ),
     );
     if (result != null) {
-      controller.setSpeed(result);
+      await _nativeController.setPlaybackSpeed(result);
       ref
           .read(settingsProvider.notifier)
           .updateSetting('playback_speed', result);
     }
   }
 
-  void _openAudioTrackSelector() async {
-    final controller = _controller;
-    if (controller == null) return;
-    final handles = controller.betterPlayerAsmsAudioTracks ?? [];
-    if (handles.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No alternative audio tracks found')),
-      );
-      return;
-    }
-    final result = await showModalBottomSheet<BetterPlayerAsmsAudioTrack>(
+  Future<void> _showDecoderSelector() async {
+    final hardware = _settings?.enableHardwareAcceleration ?? true;
+    final result = await showModalBottomSheet<DecoderType>(
       context: context,
-      builder: (context) => _buildAudioTrackSheet(handles),
+      builder: (context) => _OptionSheet<DecoderType>(
+        title: 'Decoder',
+        options: const [DecoderType.hardware, DecoderType.software],
+        formatter: (value) =>
+            value == DecoderType.hardware ? 'Hardware' : 'Software',
+        selected: hardware ? DecoderType.hardware : DecoderType.software,
+      ),
     );
     if (result != null) {
-      controller.setAudioTrack(result);
+      await _nativeController.setDecoder(result);
+      ref
+          .read(settingsProvider.notifier)
+          .updateSetting(
+            'hardware_acceleration',
+            result == DecoderType.hardware,
+          );
     }
   }
 
-  void _openSubtitleSelector() async {
-    final controller = _controller;
-    if (controller == null) return;
-    final subtitles = controller.betterPlayerSubtitlesSourceList ?? [];
-    final result = await showModalBottomSheet<BetterPlayerSubtitlesSource>(
+  Future<void> _showAspectRatioSelector() async {
+    final result = await showModalBottomSheet<AspectRatioMode>(
       context: context,
-      builder: (context) => _buildSubtitleSheet(subtitles),
+      builder: (context) => _OptionSheet<AspectRatioMode>(
+        title: 'Aspect ratio',
+        options: const [
+          AspectRatioMode.fit,
+          AspectRatioMode.fixedWidth,
+          AspectRatioMode.fixedHeight,
+          AspectRatioMode.fill,
+          AspectRatioMode.zoom,
+        ],
+        formatter: (mode) {
+          switch (mode) {
+            case AspectRatioMode.fit:
+              return 'Fit';
+            case AspectRatioMode.fixedWidth:
+              return '16:9';
+            case AspectRatioMode.fixedHeight:
+              return '4:3';
+            case AspectRatioMode.fill:
+              return 'Stretch';
+            case AspectRatioMode.zoom:
+              return 'Zoom';
+          }
+        },
+        selected: AspectRatioMode.fit,
+      ),
     );
     if (result != null) {
-      controller.setupSubtitleSource(result);
+      await _nativeController.setAspectRatio(result);
     }
   }
 
-  void _adjustSubtitleDelay(bool increase) {
-    const step = 250.0; // milliseconds
-    setState(() {
-      _subtitleDelayMs += increase ? step : -step;
-    });
-    _controller?.setSubtitlesDelay(_subtitleDelayMs);
-  }
+  Future<void> _openTracksSheet() async {
+    final audioTracks = await _nativeController.getAudioTracks();
+    final subtitleTracks = await _nativeController.getSubtitleTracks();
 
-  void _adjustAudioDelay(bool increase) {
-    const step = 250.0;
-    setState(() {
-      _audioDelayMs += increase ? step : -step;
-    });
-    _controller?.setAudioTrackDelay(_audioDelayMs);
-  }
+    if (!mounted) return;
 
-  void _setABPoint({required bool isStart}) {
-    final position = _currentPosition;
-    setState(() {
-      if (isStart) {
-        _abStart = position;
-        if (_abEnd != null && _abEnd! <= _abStart!) {
-          _abEnd = null;
-        }
-      } else {
-        _abEnd = position;
-      }
-    });
-  }
-
-  void _clearABPoints() {
-    setState(() {
-      _abStart = null;
-      _abEnd = null;
-    });
-  }
-
-  void _seekToRelative(double fraction) {
-    final controller = _controller;
-    if (controller == null) return;
-    final target = Duration(
-      milliseconds: (_totalDuration.inMilliseconds * fraction).round(),
-    );
-    controller.seekTo(target);
-  }
-
-  void _ensureWakelock(bool keepScreenOn) {
-    if (keepScreenOn) {
-      WakelockPlus.enable();
-    } else {
-      WakelockPlus.disable();
-    }
-  }
-
-  void _applySettings(AppSettings settings) {
-    _settings = settings;
-    _backgroundOption = settings.backgroundPlayOption;
-    _autoEnterPip = settings.autoEnterPip;
-    _allowGestureSeek = settings.enableGestureSeek;
-    _allowGestureBrightness = settings.enableGestureBrightness;
-    _allowGestureVolume = settings.enableGestureVolume;
-    _showGestureHints = settings.showGesturesHints;
-    _oneHandMode = settings.gestureOneHandMode;
-    _audioOnly = settings.audioOnly;
-    _volumeBoostEnabled = settings.volumeBoost;
-    _volumeBoostFactor = settings.volumeBoost ? 1.25 : 1.0;
-  }
-
-  void _onSettingsChanged(AppSettings? previous, AppSettings next) {
-    final prev = previous ?? _settings;
-    final playbackSpeedChanged = prev.playbackSpeed != next.playbackSpeed;
-    final sleepTimerChanged = prev.sleepTimerMinutes != next.sleepTimerMinutes;
-    final keepScreenOnChanged = prev.keepScreenOn != next.keepScreenOn;
-
-    setState(() {
-      _applySettings(next);
-    });
-
-    if (playbackSpeedChanged) {
-      _controller?.setSpeed(next.playbackSpeed);
-    }
-    if (sleepTimerChanged) {
-      _configureSleepTimer(next);
-    }
-    if (keepScreenOnChanged) {
-      _ensureWakelock(next.keepScreenOn);
-    }
-  }
-
-  Widget _buildGestureOverlay() {
-    if (_isBrightnessGesture) {
-      return _buildOverlayIndicator(
-        icon: Icons.brightness_6,
-        value: (_currentBrightness * 100).round(),
-        suffix: '%',
-      );
-    }
-    if (_isVolumeGesture) {
-      return _buildOverlayIndicator(
-        icon: Icons.volume_up,
-        value: (_currentVolume * 100).round(),
-        suffix: '%',
-      );
-    }
-    if (_isSeekingGesture) {
-      return _buildOverlayIndicator(
-        icon: _gestureDeltaSeconds >= 0
-            ? Icons.fast_forward
-            : Icons.fast_rewind,
-        value: _gestureDeltaSeconds.round(),
-        suffix: 's',
-      );
-    }
-    if (_sleepTimerExpired) {
-      return _buildOverlayIndicator(
-        icon: Icons.timer_off,
-        value: 0,
-        suffix: '',
-        message: 'Sleep timer expired',
-      );
-    }
-    return const SizedBox.shrink();
-  }
-
-  Widget _buildOverlayIndicator({
-    required IconData icon,
-    required int value,
-    required String suffix,
-    String? message,
-  }) {
-    return Align(
-      alignment: Alignment.center,
-      child: Container(
-        width: 180,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          color: Colors.black54,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: Colors.white, size: 36),
-            const SizedBox(height: 12),
-            Text(
-              message ?? '$value$suffix',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (context) => _TracksSheet(
+        audioTracks: audioTracks,
+        subtitleTracks: subtitleTracks,
+        onAudioSelected: (track) {
+          _nativeController.switchAudioTrack(
+            track.groupIndex,
+            track.trackIndex,
+          );
+        },
+        onSubtitleSelected: (track) {
+          if (track == null) {
+            _nativeController.selectSubtitleTrack(
+              groupIndex: null,
+              trackIndex: null,
+            );
+          } else {
+            _nativeController.selectSubtitleTrack(
+              groupIndex: track.groupIndex,
+              trackIndex: track.trackIndex,
+            );
+          }
+        },
       ),
     );
   }
 
-  Widget _buildControlsOverlay() {
-    if (!_isControlsVisible) return const SizedBox.shrink();
-    final controller = _controller;
-    final isPlaying = controller?.isPlaying() ?? false;
-
-    return IgnorePointer(
-      ignoring: _isLocked,
-      child: Column(
-        children: [
-          _buildTopBar(),
-          const Spacer(),
-          _buildCenterControls(isPlaying),
-          const Spacer(),
-          if (_showGestureHints)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-              child: Text(
-                'Swipe left/right to seek · Up/down to adjust ${_allowGestureBrightness && _allowGestureVolume
-                    ? 'brightness & volume'
-                    : _allowGestureBrightness
-                    ? 'brightness'
-                    : 'volume'}',
-                style: const TextStyle(color: Colors.white70, fontSize: 12),
-                textAlign: TextAlign.center,
+  Future<void> _showVideoInfo() async {
+    final info = await _nativeController.getVideoInformation();
+    if (!mounted || info == null) return;
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Video information'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _InfoRow(label: 'Codec', value: info.videoCodec ?? 'Unknown'),
+            _InfoRow(
+              label: 'Resolution',
+              value: info.width != null && info.height != null
+                  ? '${info.width} x ${info.height}'
+                  : 'Unknown',
+            ),
+            _InfoRow(
+              label: 'Frame rate',
+              value: info.frameRate?.toStringAsFixed(2) ?? 'Unknown',
+            ),
+            _InfoRow(label: 'Audio', value: info.audioCodec ?? 'Unknown'),
+            _InfoRow(
+              label: 'Channels',
+              value: info.audioChannels?.toString() ?? 'Unknown',
+            ),
+            _InfoRow(
+              label: 'Sample rate',
+              value: info.audioSampleRate != null
+                  ? '${info.audioSampleRate} Hz'
+                  : 'Unknown',
+            ),
+            _InfoRow(
+              label: 'Duration',
+              value: _formatDuration(
+                Duration(milliseconds: info.duration ?? 0),
               ),
             ),
-          _buildBottomBar(),
+            _InfoRow(
+              label: 'Size',
+              value: info.size != null
+                  ? _formatFileSize(info.size!)
+                  : 'Unknown',
+            ),
+            _InfoRow(label: 'Path', value: info.path ?? widget.videoPath),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
         ],
+      ),
+    );
+  }
+
+  Future<void> _showSleepTimerDialog() async {
+    const durations = [0, 15, 30, 45, 60, 90, 120];
+    final current = _settings?.sleepTimerMinutes ?? 0;
+    final result = await showModalBottomSheet<int>(
+      context: context,
+      builder: (context) => _OptionSheet<int>(
+        title: 'Sleep timer',
+        options: durations,
+        formatter: (minutes) => minutes == 0 ? 'Off' : '$minutes minutes',
+        selected: current,
+      ),
+    );
+    if (result != null) {
+      ref
+          .read(settingsProvider.notifier)
+          .updateSetting('sleep_timer_minutes', result);
+    }
+  }
+
+  void _adjustSubtitleDelay(bool increase) {
+    final delta = const Duration(milliseconds: 250);
+    setState(() {
+      _subtitleDelay += increase ? delta : -delta;
+    });
+    _nativeController.setSubtitleDelay(_subtitleDelay);
+  }
+
+  void _adjustAudioDelay(bool increase) {
+    final delta = const Duration(milliseconds: 250);
+    setState(() {
+      _audioDelay += increase ? delta : -delta;
+    });
+    _nativeController.setAudioDelay(_audioDelay);
+  }
+
+  Future<List<String>> _loadSubtitlePaths() async {
+    final source = File(widget.videoPath);
+    if (!await source.exists()) return [];
+    final directory = source.parent;
+    final subtitleFiles = directory.listSync().whereType<File>().where((file) {
+      final lower = file.path.toLowerCase();
+      return lower.endsWith('.srt') ||
+          lower.endsWith('.ass') ||
+          lower.endsWith('.ssa');
+    }).toList()..sort((a, b) => a.path.compareTo(b.path));
+    return subtitleFiles.map((file) => file.path).toList();
+  }
+
+  Widget _buildBody() {
+    final children = <Widget>[
+      Positioned.fill(
+        child: AndroidView(
+          viewType: 'com.a2orbit.player/texture',
+          onPlatformViewCreated: _onPlatformViewCreated,
+          creationParams: {
+            'source': widget.videoPath,
+            'subtitles': const <String>[],
+            'startPosition': _resumePosition?.inMilliseconds ?? 0,
+            'autoPlay': widget.autoPlay,
+          },
+          creationParamsCodec: const StandardMessageCodec(),
+        ),
+      ),
+    ];
+
+    if (_isLoading) {
+      children.add(_buildLoadingOverlay());
+    }
+
+    if (_hasError) {
+      children.add(_buildErrorOverlay());
+    } else {
+      if (_isAudioOnly) {
+        children.add(_buildAudioOnlyOverlay());
+      }
+      if (_showControls) {
+        children.add(_buildControlsOverlay());
+      }
+      if (_isBuffering) {
+        children.add(_buildBufferingIndicator());
+      }
+    }
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: _toggleControls,
+      onDoubleTapDown: (details) {
+        final width = MediaQuery.of(context).size.width;
+        _handleDoubleTap(details.localPosition.dx, width);
+      },
+      child: Stack(children: children),
+    );
+  }
+
+  Widget _buildControlsOverlay() {
+    return Positioned.fill(
+      child: IgnorePointer(
+        ignoring: _isLocked,
+        child: Column(
+          children: [
+            _buildTopBar(),
+            const Spacer(),
+            _buildCenterControls(),
+            const Spacer(),
+            _buildBottomBar(),
+          ],
+        ),
       ),
     );
   }
@@ -804,19 +650,17 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
   Widget _buildTopBar() {
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
           children: [
             IconButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-              icon: const Icon(Icons.arrow_back, color: Colors.white),
+              onPressed: () => Navigator.of(context).maybePop(),
+              icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 12),
             Expanded(
               child: Text(
-                File(widget.videoPath).uri.pathSegments.last,
+                _videoTitle,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
@@ -827,12 +671,15 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
               ),
             ),
             IconButton(
-              onPressed: _openSubtitleSelector,
+              onPressed: _openTracksSheet,
               icon: const Icon(Icons.subtitles, color: Colors.white),
             ),
             IconButton(
-              onPressed: _openAudioTrackSelector,
-              icon: const Icon(Icons.headset, color: Colors.white),
+              onPressed: _showDecoderSelector,
+              icon: const Icon(
+                Icons.settings_input_component,
+                color: Colors.white,
+              ),
             ),
             IconButton(
               onPressed: _enterPictureInPicture,
@@ -842,7 +689,7 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
               ),
             ),
             IconButton(
-              onPressed: () => _toggleLock(),
+              onPressed: _toggleLock,
               icon: Icon(
                 _isLocked ? Icons.lock : Icons.lock_open,
                 color: Colors.white,
@@ -854,85 +701,61 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
     );
   }
 
-  Widget _buildCenterControls(bool isPlaying) {
-    final alignment = _oneHandMode ? Alignment.centerRight : Alignment.center;
-    return GestureDetector(
-      onTap: _toggleControls,
-      child: Align(
-        alignment: alignment,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _buildSeekButton(Icons.replay_10, false),
-            const SizedBox(width: 24),
-            InkWell(
-              onTap: _togglePlayPause,
-              child: Container(
-                padding: const EdgeInsets.all(18),
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  isPlaying ? Icons.pause : Icons.play_arrow,
-                  size: 40,
-                  color: Colors.black,
-                ),
-              ),
-            ),
-            const SizedBox(width: 24),
-            _buildSeekButton(Icons.forward_10, true),
-          ],
+  Widget _buildCenterControls() {
+    final settings = _settings;
+    final seekDuration = settings?.seekDuration ?? 10000;
+    final jump = Duration(milliseconds: seekDuration);
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        _RoundIconButton(
+          icon: Icons.replay_10,
+          onPressed: () => _seekRelative(-jump),
         ),
-      ),
-    );
-  }
-
-  Widget _buildSeekButton(IconData icon, bool forward) {
-    return InkWell(
-      onTap: () => _onDoubleTap(forward),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.35),
-          borderRadius: BorderRadius.circular(16),
+        const SizedBox(width: 32),
+        _PlayPauseButton(isPlaying: _isPlaying, onPressed: _togglePlayPause),
+        const SizedBox(width: 32),
+        _RoundIconButton(
+          icon: Icons.forward_10,
+          onPressed: () => _seekRelative(jump),
         ),
-        child: Icon(icon, size: 32, color: Colors.white),
-      ),
+      ],
     );
   }
 
   Widget _buildBottomBar() {
-    final positionLabel = _formatDuration(_currentPosition);
-    final totalLabel = _formatDuration(_totalDuration);
+    final positionLabel = _formatDuration(_position);
+    final durationLabel = _formatDuration(_duration);
+    final durationMs = _duration.inMilliseconds.toDouble();
+    final maxValue = math.max(durationMs, 1.0);
+    final positionMs = _position.inMilliseconds.toDouble().clamp(0.0, maxValue);
 
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
             SliderTheme(
               data: SliderTheme.of(context).copyWith(
+                trackHeight: 3,
                 thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
-                overlayShape: SliderComponentShape.noOverlay,
               ),
               child: Slider(
                 min: 0,
-                max: math.max(_totalDuration.inMilliseconds.toDouble(), 1.0),
-                value: math.min(
-                  _currentPosition.inMilliseconds.toDouble(),
-                  _totalDuration.inMilliseconds.toDouble(),
-                ),
+                max: math.max(durationMs, 1),
+                value: positionMs,
                 onChanged: (value) {
-                  _controller?.seekTo(Duration(milliseconds: value.round()));
+                  _nativeController.seekTo(
+                    Duration(milliseconds: value.round()),
+                  );
                 },
               ),
             ),
             Row(
               children: [
                 Text(
-                  '$positionLabel / $totalLabel',
+                  '$positionLabel / $durationLabel',
                   style: const TextStyle(color: Colors.white70, fontSize: 12),
                 ),
                 const Spacer(),
@@ -941,8 +764,8 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
                   icon: const Icon(Icons.subtitles_off, color: Colors.white),
                 ),
                 Text(
-                  '${(_subtitleDelayMs / 1000).toStringAsFixed(1)}s',
-                  style: const TextStyle(color: Colors.white70),
+                  '${(_subtitleDelay.inMilliseconds / 1000).toStringAsFixed(1)}s',
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
                 ),
                 IconButton(
                   onPressed: () => _adjustSubtitleDelay(true),
@@ -953,8 +776,8 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
                   icon: const Icon(Icons.volume_down, color: Colors.white),
                 ),
                 Text(
-                  '${(_audioDelayMs / 1000).toStringAsFixed(1)}s',
-                  style: const TextStyle(color: Colors.white70),
+                  '${(_audioDelay.inMilliseconds / 1000).toStringAsFixed(1)}s',
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
                 ),
                 IconButton(
                   onPressed: () => _adjustAudioDelay(true),
@@ -962,37 +785,30 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
                 ),
                 PopupMenuButton<String>(
                   icon: const Icon(Icons.more_vert, color: Colors.white),
-                  onSelected: _handleMenuSelection,
-                  itemBuilder: (context) => [
-                    const PopupMenuItem(
+                  onSelected: (value) {
+                    switch (value) {
+                      case 'speed':
+                        _showSpeedSheet();
+                        break;
+                      case 'ratio':
+                        _showAspectRatioSelector();
+                        break;
+                      case 'info':
+                        _showVideoInfo();
+                        break;
+                      case 'sleep':
+                        _showSleepTimerDialog();
+                        break;
+                    }
+                  },
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(
                       value: 'speed',
                       child: Text('Playback speed'),
                     ),
-                    PopupMenuItem(
-                      value: 'ab_start',
-                      child: Text(
-                        _abStart == null
-                            ? 'Set A point'
-                            : 'Update A point (${_formatDuration(_abStart!)})',
-                      ),
-                    ),
-                    PopupMenuItem(
-                      value: 'ab_end',
-                      child: Text(
-                        _abEnd == null
-                            ? 'Set B point'
-                            : 'Update B point (${_formatDuration(_abEnd!)})',
-                      ),
-                    ),
-                    if (_abStart != null || _abEnd != null)
-                      const PopupMenuItem(
-                        value: 'ab_clear',
-                        child: Text('Clear A-B loop'),
-                      ),
-                    const PopupMenuItem(
-                      value: 'resume_reset',
-                      child: Text('Reset resume position'),
-                    ),
+                    PopupMenuItem(value: 'ratio', child: Text('Aspect ratio')),
+                    PopupMenuItem(value: 'info', child: Text('Video info')),
+                    PopupMenuItem(value: 'sleep', child: Text('Sleep timer')),
                   ],
                 ),
               ],
@@ -1003,185 +819,87 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
     );
   }
 
-  void _handleMenuSelection(String value) {
-    switch (value) {
-      case 'speed':
-        _setPlaybackSpeed();
-        break;
-      case 'ab_start':
-        _setABPoint(isStart: true);
-        break;
-      case 'ab_end':
-        _setABPoint(isStart: false);
-        break;
-      case 'ab_clear':
-        _clearABPoints();
-        break;
-      case 'resume_reset':
-        _historyService.clearPosition(widget.videoPath);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Resume position cleared')),
-        );
-        break;
-    }
-  }
-
-  Widget _buildSimpleSheet<T>({
-    required String title,
-    required List<T> values,
-    required T currentValue,
-    required String Function(T) formatter,
-  }) {
-    return SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Text(
-              title,
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ),
-          ...values.map(
-            (value) => ListTile(
-              title: Text(formatter(value)),
-              trailing: value == currentValue
-                  ? const Icon(Icons.check, color: Colors.blue)
-                  : null,
-              onTap: () => Navigator.pop(context, value),
-            ),
-          ),
-        ],
+  Widget _buildLoadingOverlay() {
+    return const Positioned.fill(
+      child: ColoredBox(
+        color: Colors.black,
+        child: Center(child: CircularProgressIndicator()),
       ),
     );
   }
 
-  Widget _buildAudioTrackSheet(List<BetterPlayerAsmsAudioTrack> tracks) {
-    final currentTrack = _controller
-        ?.betterPlayerAsmsAudioTrack; // ignore: deprecated_member_use
-    return SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Padding(
-            padding: EdgeInsets.all(16),
-            child: Text(
-              'Audio Tracks',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ),
-          ...tracks.map(
-            (track) => ListTile(
-              title: Text(
-                '${track.name ?? track.language ?? 'Track'} (${track.language ?? 'Unknown'})',
+  Widget _buildBufferingIndicator() {
+    return const Positioned.fill(
+      child: IgnorePointer(
+        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+      ),
+    );
+  }
+
+  Widget _buildAudioOnlyOverlay() {
+    return const Positioned.fill(
+      child: ColoredBox(
+        color: Colors.black,
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.headphones, color: Colors.white, size: 72),
+              SizedBox(height: 16),
+              Text(
+                'Audio-only mode',
+                style: TextStyle(color: Colors.white70, fontSize: 16),
               ),
-              subtitle: Text('Bitrate: ${track.bitrate ?? 'N/A'}'),
-              trailing: currentTrack?.id == track.id
-                  ? const Icon(Icons.check, color: Colors.blue)
-                  : null,
-              onTap: () => Navigator.pop(context, track),
-            ),
+            ],
           ),
-          ListTile(
-            leading: const Icon(Icons.timer_sharp),
-            title: const Text('Audio delay +0.25s'),
-            onTap: () {
-              Navigator.pop(context);
-              _adjustAudioDelay(true);
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.timer_outlined),
-            title: const Text('Audio delay -0.25s'),
-            onTap: () {
-              Navigator.pop(context);
-              _adjustAudioDelay(false);
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSubtitleSheet(List<BetterPlayerSubtitlesSource> subtitles) {
-    final current = _controller?.betterPlayerSubtitlesSource;
-    return SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Padding(
-            padding: EdgeInsets.all(16),
-            child: Text(
-              'Subtitles',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ),
-          ListTile(
-            title: const Text('Disable subtitles'),
-            trailing: current == null
-                ? const Icon(Icons.check, color: Colors.blue)
-                : null,
-            onTap: () => Navigator.pop(context, null),
-          ),
-          ...subtitles.map(
-            (subtitle) => ListTile(
-              title: Text(subtitle.name ?? 'Subtitle'),
-              trailing: current?.name == subtitle.name
-                  ? const Icon(Icons.check, color: Colors.blue)
-                  : null,
-              onTap: () => Navigator.pop(context, subtitle),
-            ),
-          ),
-          ListTile(
-            leading: const Icon(Icons.add),
-            title: const Text('Load external subtitle'),
-            onTap: () {
-              Navigator.pop(context);
-              _showExternalSubtitleInfo();
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.timer_sharp),
-            title: const Text('Subtitle delay +0.25s'),
-            onTap: () {
-              Navigator.pop(context);
-              _adjustSubtitleDelay(true);
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.timer_outlined),
-            title: const Text('Subtitle delay -0.25s'),
-            onTap: () {
-              Navigator.pop(context);
-              _adjustSubtitleDelay(false);
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showExternalSubtitleInfo() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Load External Subtitles'),
-        content: const Text(
-          'Place subtitle files (.srt, .ass, .ssa) in the same folder as the video. '
-          'They will be detected automatically when you reopen the video.',
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
-          ),
-        ],
       ),
     );
   }
+
+  Widget _buildErrorOverlay() {
+    return Positioned.fill(
+      child: ColoredBox(
+        color: Colors.black,
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.error_outline,
+                  color: Colors.redAccent,
+                  size: 48,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  _errorMessage ?? 'Playback error',
+                  style: const TextStyle(color: Colors.white70),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton.icon(
+                  onPressed: () => _resetStateForNewSource(),
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Retry'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _enterPictureInPicture() {
+    _nativeController.enterPictureInPicture();
+  }
+
+  String get _videoTitle => File(widget.videoPath).uri.pathSegments.last;
 
   String _formatDuration(Duration duration) {
+    if (duration <= Duration.zero) return '00:00';
     final hours = duration.inHours;
     final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
     final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
@@ -1191,112 +909,207 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
     return '$minutes:$seconds';
   }
 
+  String _formatFileSize(int bytes) {
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    var value = bytes.toDouble();
+    var index = 0;
+    while (value >= 1024 && index < units.length - 1) {
+      value /= 1024;
+      index++;
+    }
+    return '${value.toStringAsFixed(1)} ${units[index]}';
+  }
+
   @override
   Widget build(BuildContext context) {
-    final controller = _controller;
+    return Scaffold(backgroundColor: Colors.black, body: _buildBody());
+  }
+}
 
-    if (_hasError) {
-      return _buildErrorState();
-    }
+class _RoundIconButton extends StatelessWidget {
+  const _RoundIconButton({required this.icon, required this.onPressed});
 
-    if (_isLoading || controller == null) {
-      return const Center(child: CircularProgressIndicator());
-    }
+  final IconData icon;
+  final VoidCallback onPressed;
 
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(
-        fit: StackFit.expand,
+  @override
+  Widget build(BuildContext context) {
+    return InkResponse(
+      onTap: onPressed,
+      radius: 36,
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.black45,
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white24),
+        ),
+        child: Icon(icon, color: Colors.white),
+      ),
+    );
+  }
+}
+
+class _PlayPauseButton extends StatelessWidget {
+  const _PlayPauseButton({required this.isPlaying, required this.onPressed});
+
+  final bool isPlaying;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkResponse(
+      onTap: onPressed,
+      radius: 40,
+      child: Container(
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: Colors.black54,
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white30, width: 1.6),
+        ),
+        child: Icon(
+          isPlaying ? Icons.pause : Icons.play_arrow,
+          size: 42,
+          color: Colors.white,
+        ),
+      ),
+    );
+  }
+}
+
+class _OptionSheet<T> extends StatelessWidget {
+  const _OptionSheet({
+    required this.title,
+    required this.options,
+    required this.formatter,
+    required this.selected,
+  });
+
+  final String title;
+  final List<T> options;
+  final String Function(T value) formatter;
+  final T selected;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Positioned.fill(
-            child: GestureDetector(
-              onTap: _toggleControls,
-              onDoubleTapDown: (details) {
-                final half = MediaQuery.of(context).size.width / 2;
-                final isRight = details.localPosition.dx > half;
-                _onDoubleTap(isRight);
-              },
-              onHorizontalDragUpdate: _onHorizontalDragUpdate,
-              onHorizontalDragEnd: _onHorizontalDragEnd,
-              onVerticalDragStart: (details) {
-                final half = MediaQuery.of(context).size.width / 2;
-                final isLeft = details.localPosition.dx < half;
-                _onVerticalDragStart(details, isLeft);
-              },
-              onVerticalDragUpdate: _onVerticalDragUpdate,
-              onVerticalDragEnd: _onVerticalDragEnd,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  Opacity(
-                    opacity: _audioOnly ? 0.0 : 1.0,
-                    child: BetterPlayer(controller: controller),
-                  ),
-                  if (_audioOnly)
-                    Container(
-                      color: Colors.black,
-                      child: Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: const [
-                            Icon(
-                              Icons.headphones,
-                              color: Colors.white,
-                              size: 72,
-                            ),
-                            SizedBox(height: 16),
-                            Text(
-                              'Audio Only Mode',
-                              style: TextStyle(
-                                color: Colors.white70,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                ],
-              ),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text(title, style: Theme.of(context).textTheme.titleMedium),
+          ),
+          ...options.map(
+            (option) => RadioListTile<T>(
+              value: option,
+              groupValue: selected,
+              onChanged: (value) => Navigator.of(context).pop(value),
+              title: Text(formatter(option)),
             ),
           ),
-          _buildGestureOverlay(),
-          _buildControlsOverlay(),
         ],
       ),
     );
   }
+}
 
-  Widget _buildErrorState() {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                Icons.error_outline,
-                color: Colors.redAccent,
-                size: 48,
+class _TracksSheet extends StatelessWidget {
+  const _TracksSheet({
+    required this.audioTracks,
+    required this.subtitleTracks,
+    required this.onAudioSelected,
+    required this.onSubtitleSelected,
+  });
+
+  final List<NativeAudioTrack> audioTracks;
+  final List<NativeSubtitleTrack> subtitleTracks;
+  final ValueChanged<NativeAudioTrack> onAudioSelected;
+  final ValueChanged<NativeSubtitleTrack?> onSubtitleSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Audio tracks',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            if (audioTracks.isEmpty)
+              const Text('No alternate audio tracks found.'),
+            ...audioTracks.map(
+              (track) => ListTile(
+                leading: const Icon(Icons.audiotrack),
+                title: Text(track.label),
+                subtitle: Text(track.language),
+                onTap: () {
+                  onAudioSelected(track);
+                  Navigator.of(context).pop();
+                },
               ),
-              const SizedBox(height: 16),
-              Text(
-                _errorMessage ?? 'Playback error',
-                style: const TextStyle(color: Colors.white70),
-                textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            Text('Subtitles', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            ListTile(
+              leading: const Icon(Icons.visibility_off),
+              title: const Text('None'),
+              onTap: () {
+                onSubtitleSelected(null);
+                Navigator.of(context).pop();
+              },
+            ),
+            ...subtitleTracks.map(
+              (track) => ListTile(
+                leading: const Icon(Icons.subtitles),
+                title: Text(track.label),
+                subtitle: Text(track.language),
+                onTap: () {
+                  onSubtitleSelected(track);
+                  Navigator.of(context).pop();
+                },
               ),
-              const SizedBox(height: 24),
-              ElevatedButton.icon(
-                onPressed: _initializePlayer,
-                icon: const Icon(Icons.refresh),
-                label: const Text('Retry'),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
+      ),
+    );
+  }
+}
+
+class _InfoRow extends StatelessWidget {
+  const _InfoRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 110,
+            child: Text(
+              label,
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(value, style: Theme.of(context).textTheme.bodySmall),
+          ),
+        ],
       ),
     );
   }

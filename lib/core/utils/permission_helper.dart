@@ -1,59 +1,95 @@
 import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 class PermissionHelper {
   static Future<bool> requestStoragePermissions() async {
+    if (!Platform.isAndroid) {
+      return false;
+    }
+
     try {
-      List<Permission> permissions = [];
-
-      if (Platform.isAndroid) {
-        // For Android 13+ (API 33+)
-        permissions.addAll([
-          Permission.photos,
-          Permission.videos,
-          Permission.audio,
-        ]);
-
-        // For older Android versions
-        permissions.add(Permission.storage);
+      if (await checkStoragePermissions()) {
+        return true;
       }
 
-      final requestResults = await permissions.request();
+      final permissionsToRequest = <Permission>[];
 
-      // Check if any permission was granted
-      for (var permission in permissions) {
-        if (requestResults[permission] == PermissionStatus.granted) {
+      final videosStatus = await Permission.videos.status;
+      if (videosStatus.isDenied || videosStatus.isRestricted) {
+        permissionsToRequest.add(Permission.videos);
+      }
+
+      final audioStatus = await Permission.audio.status;
+      if (audioStatus.isDenied || audioStatus.isRestricted) {
+        permissionsToRequest.add(Permission.audio);
+      }
+
+      final photosStatus = await Permission.photos.status;
+      if (photosStatus.isDenied || photosStatus.isRestricted) {
+        permissionsToRequest.add(Permission.photos);
+      }
+
+      final storageStatus = await Permission.storage.status;
+      if (storageStatus.isDenied || storageStatus.isRestricted) {
+        permissionsToRequest.add(Permission.storage);
+      }
+
+      if (permissionsToRequest.isNotEmpty) {
+        bool granted = false;
+        for (final permission in permissionsToRequest) {
+          final result = await permission.request();
+          if (result.isGranted || result.isLimited) {
+            granted = true;
+          }
+        }
+
+        if (granted && await checkStoragePermissions()) {
+          return true;
+        }
+      }
+
+      // Fallback for scoped storage (Android 11/12)
+      final manageStatus = await Permission.manageExternalStorage.status;
+      if (manageStatus.isGranted) {
+        return true;
+      }
+
+      if (manageStatus.isDenied || manageStatus.isRestricted) {
+        final newStatus = await Permission.manageExternalStorage.request();
+        if (newStatus.isGranted) {
           return true;
         }
       }
 
       return false;
-    } catch (e) {
-      print('Error requesting permissions: $e');
+    } catch (e, stackTrace) {
+      debugPrint('Error requesting permissions: $e\n$stackTrace');
       return false;
     }
   }
 
   static Future<bool> checkStoragePermissions() async {
-    try {
-      if (Platform.isAndroid) {
-        // Check Android 13+ permissions first
-        final photos = await Permission.photos.status;
-        final videos = await Permission.videos.status;
-        final audio = await Permission.audio.status;
-
-        if (photos.isGranted || videos.isGranted || audio.isGranted) {
-          return true;
-        }
-
-        // Check legacy storage permission
-        final storage = await Permission.storage.status;
-        return storage.isGranted;
-      }
-
+    if (!Platform.isAndroid) {
       return false;
-    } catch (e) {
-      print('Error checking permissions: $e');
+    }
+
+    try {
+      final videos = await Permission.videos.status;
+      final photos = await Permission.photos.status;
+      final audio = await Permission.audio.status;
+      final storage = await Permission.storage.status;
+      final manage = await Permission.manageExternalStorage.status;
+
+      return videos.isGranted ||
+          photos.isGranted ||
+          audio.isGranted ||
+          storage.isGranted ||
+          storage.isLimited ||
+          manage.isGranted;
+    } catch (e, stackTrace) {
+      debugPrint('Error checking permissions: $e\n$stackTrace');
       return false;
     }
   }

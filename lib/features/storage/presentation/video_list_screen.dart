@@ -349,8 +349,7 @@ class _VideoListScreenState extends ConsumerState<VideoListScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) =>
-            VideoPlayerWidget(videoPath: video.path, autoPlay: true),
+        builder: (context) => VideoPlayerWidget(videoPath: video.path),
       ),
     );
   }

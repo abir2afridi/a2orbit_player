@@ -1,10 +1,13 @@
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
-import 'package:permission_handler/permission_handler.dart';
+import '../utils/permission_helper.dart';
 
 class FolderScanService {
   static const List<String> _supportedVideoExtensions = [
-    '.mp4', '.mkv', '.avi', '.mov'
+    '.mp4',
+    '.mkv',
+    '.avi',
+    '.mov',
   ];
 
   static const List<String> _excludedPaths = [
@@ -26,8 +29,14 @@ class FolderScanService {
   /// Returns Map<folderPath, List<videoFiles>>
   static Future<Map<String, List<File>>> scanFoldersWithVideos() async {
     final Map<String, List<File>> foldersWithVideos = {};
-    
+
     try {
+      // Ensure permissions before attempting to scan
+      final hasPermission = await PermissionHelper.requestStoragePermissions();
+      if (!hasPermission) {
+        return foldersWithVideos;
+      }
+
       // Get external storage directory
       final externalDir = await getExternalStorageDirectory();
       if (externalDir == null) return foldersWithVideos;
@@ -42,16 +51,15 @@ class FolderScanService {
       }
 
       print('Starting scan from: $storagePath');
-      
+
       // Scan recursively but collect only folders with videos
       await _scanDirectoryRecursive(storageDir, foldersWithVideos);
-      
+
       // Filter out parent folders that have subfolders with videos
       final filteredFolders = _filterLastLevelFolders(foldersWithVideos);
-      
+
       print('Found ${filteredFolders.length} folders with videos');
       return filteredFolders;
-      
     } catch (e) {
       print('Error scanning folders: $e');
       return foldersWithVideos;
@@ -71,7 +79,7 @@ class FolderScanService {
 
       final List<File> videosInFolder = [];
       final List<Directory> subdirectories = [];
-      
+
       // List all entities in directory
       await for (final entity in dir.list()) {
         try {
@@ -99,7 +107,6 @@ class FolderScanService {
       for (final subdir in subdirectories) {
         await _scanDirectoryRecursive(subdir, foldersWithVideos);
       }
-      
     } catch (e) {
       print('Error scanning directory ${dir.path}: $e');
     }
@@ -112,13 +119,13 @@ class FolderScanService {
   ) {
     final Map<String, List<File>> lastLevelFolders = {};
     final List<String> folderPaths = foldersWithVideos.keys.toList();
-    
+
     // Sort paths by length (longest first = deepest)
     folderPaths.sort((a, b) => b.length.compareTo(a.length));
-    
+
     for (final folderPath in folderPaths) {
       bool isLastLevel = true;
-      
+
       // Check if this folder is a parent of any other folder
       for (final otherPath in folderPaths) {
         if (otherPath != folderPath && otherPath.startsWith('$folderPath/')) {
@@ -127,12 +134,12 @@ class FolderScanService {
           break;
         }
       }
-      
+
       if (isLastLevel) {
         lastLevelFolders[folderPath] = foldersWithVideos[folderPath]!;
       }
     }
-    
+
     return lastLevelFolders;
   }
 
@@ -158,12 +165,18 @@ class FolderScanService {
   }
 
   /// Gets video count for folder
-  static int getVideoCount(Map<String, List<File>> foldersWithVideos, String folderPath) {
+  static int getVideoCount(
+    Map<String, List<File>> foldersWithVideos,
+    String folderPath,
+  ) {
     return foldersWithVideos[folderPath]?.length ?? 0;
   }
 
   /// Gets first video file from folder for thumbnail
-  static File? getFirstVideo(Map<String, List<File>> foldersWithVideos, String folderPath) {
+  static File? getFirstVideo(
+    Map<String, List<File>> foldersWithVideos,
+    String folderPath,
+  ) {
     final videos = foldersWithVideos[folderPath];
     if (videos != null && videos.isNotEmpty) {
       return videos.first;
@@ -173,12 +186,6 @@ class FolderScanService {
 
   /// Requests necessary permissions
   static Future<bool> requestPermissions() async {
-    try {
-      final status = await Permission.storage.request();
-      return status.isGranted;
-    } catch (e) {
-      print('Error requesting permissions: $e');
-      return false;
-    }
+    return PermissionHelper.requestStoragePermissions();
   }
 }
