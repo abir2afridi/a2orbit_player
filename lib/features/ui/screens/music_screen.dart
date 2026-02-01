@@ -26,14 +26,14 @@ class _MusicScreenState extends State<MusicScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.background,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(context).colorScheme.surface,
         elevation: 0,
-        title: const Text(
+        title: Text(
           'Music',
           style: TextStyle(
-            color: Colors.black87,
+            color: Theme.of(context).colorScheme.onSurface,
             fontWeight: FontWeight.bold,
             fontSize: 22,
           ),
@@ -41,14 +41,19 @@ class _MusicScreenState extends State<MusicScreen>
         actions: [
           IconButton(
             onPressed: () {},
-            icon: const Icon(Icons.more_vert, color: Colors.black87),
+            icon: Icon(
+              Icons.more_vert,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
           ),
         ],
         bottom: TabBar(
           controller: _tabController,
-          labelColor: Colors.blue,
-          unselectedLabelColor: Colors.black45,
-          indicatorColor: Colors.blue,
+          labelColor: Theme.of(context).colorScheme.primary,
+          unselectedLabelColor: Theme.of(
+            context,
+          ).colorScheme.onSurface.withOpacity(0.45),
+          indicatorColor: Theme.of(context).colorScheme.primary,
           indicatorWeight: 3,
           isScrollable: true,
           labelStyle: const TextStyle(
@@ -78,19 +83,27 @@ class _MusicScreenState extends State<MusicScreen>
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                         decoration: BoxDecoration(
-                          color: Colors.grey[100],
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.surfaceVariant.withOpacity(0.5),
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        child: const TextField(
+                        child: TextField(
                           decoration: InputDecoration(
                             icon: Icon(
                               Icons.search,
-                              color: Colors.black45,
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurface.withOpacity(0.45),
                               size: 20,
                             ),
                             hintText: 'Search Songs...',
                             border: InputBorder.none,
-                            hintStyle: TextStyle(color: Colors.black38),
+                            hintStyle: TextStyle(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurface.withOpacity(0.38),
+                            ),
                           ),
                         ),
                       ),
@@ -103,8 +116,14 @@ class _MusicScreenState extends State<MusicScreen>
                         icon: const Icon(Icons.shuffle, size: 18),
                         label: const Text('Shuffle All'),
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.black87,
-                          side: BorderSide(color: Colors.grey[300]!),
+                          foregroundColor: Theme.of(
+                            context,
+                          ).colorScheme.onSurface,
+                          side: BorderSide(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.outline.withOpacity(0.3),
+                          ),
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8),
@@ -115,7 +134,10 @@ class _MusicScreenState extends State<MusicScreen>
                     const SizedBox(width: 8),
                     IconButton(
                       onPressed: () {},
-                      icon: const Icon(Icons.swap_vert, color: Colors.black87),
+                      icon: Icon(
+                        Icons.swap_vert,
+                        color: Theme.of(context).colorScheme.onSurface,
+                      ),
                     ),
                   ],
                 ),
@@ -130,12 +152,12 @@ class _MusicScreenState extends State<MusicScreen>
                       Icon(
                         Icons.music_note_outlined,
                         size: 64,
-                        color: Colors.black12,
+                        color: Colors.grey,
                       ),
                       SizedBox(height: 16),
                       Text(
                         'No songs found',
-                        style: TextStyle(color: Colors.black38, fontSize: 16),
+                        style: TextStyle(color: Colors.grey, fontSize: 16),
                       ),
                     ],
                   ),

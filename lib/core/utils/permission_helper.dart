@@ -1,9 +1,46 @@
 import 'dart:io';
 
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+class PermissionStatusDetail {
+  final String title;
+  final String description;
+  final bool granted;
+
+  const PermissionStatusDetail({
+    required this.title,
+    required this.description,
+    required this.granted,
+  });
+}
+
+class _PermissionDescriptor {
+  final Permission permission;
+  final String title;
+  final String description;
+
+  const _PermissionDescriptor(this.permission, this.title, this.description);
+}
+
 class PermissionHelper {
+  static const List<_PermissionDescriptor> _requiredPermissions = [
+    _PermissionDescriptor(
+      Permission.videos,
+      'Read Videos',
+      'Required on Android 13+ to access your offline video library.',
+    ),
+    _PermissionDescriptor(
+      Permission.storage,
+      'Legacy Storage Access',
+      'Needed on Android 12 and below to browse offline videos.',
+    ),
+  ];
+
+  static final DeviceInfoPlugin _deviceInfoPlugin = DeviceInfoPlugin();
+  static int? _cachedAndroidSdkInt;
+
   static Future<bool> requestStoragePermissions() async {
     if (!Platform.isAndroid) {
       return false;
@@ -14,56 +51,27 @@ class PermissionHelper {
         return true;
       }
 
-      final permissionsToRequest = <Permission>[];
+      final permissions = await _resolveStoragePermissions();
+      bool hasAnyGrant = false;
 
-      final videosStatus = await Permission.videos.status;
-      if (videosStatus.isDenied || videosStatus.isRestricted) {
-        permissionsToRequest.add(Permission.videos);
-      }
-
-      final audioStatus = await Permission.audio.status;
-      if (audioStatus.isDenied || audioStatus.isRestricted) {
-        permissionsToRequest.add(Permission.audio);
-      }
-
-      final photosStatus = await Permission.photos.status;
-      if (photosStatus.isDenied || photosStatus.isRestricted) {
-        permissionsToRequest.add(Permission.photos);
-      }
-
-      final storageStatus = await Permission.storage.status;
-      if (storageStatus.isDenied || storageStatus.isRestricted) {
-        permissionsToRequest.add(Permission.storage);
-      }
-
-      if (permissionsToRequest.isNotEmpty) {
-        bool granted = false;
-        for (final permission in permissionsToRequest) {
-          final result = await permission.request();
-          if (result.isGranted || result.isLimited) {
-            granted = true;
-          }
+      for (final permission in permissions) {
+        final status = await permission.status;
+        if (_isGranted(status)) {
+          hasAnyGrant = true;
+          continue;
         }
 
-        if (granted && await checkStoragePermissions()) {
-          return true;
+        final result = await permission.request();
+        if (_isGranted(result)) {
+          hasAnyGrant = true;
         }
       }
 
-      // Fallback for scoped storage (Android 11/12)
-      final manageStatus = await Permission.manageExternalStorage.status;
-      if (manageStatus.isGranted) {
+      if (hasAnyGrant) {
         return true;
       }
 
-      if (manageStatus.isDenied || manageStatus.isRestricted) {
-        final newStatus = await Permission.manageExternalStorage.request();
-        if (newStatus.isGranted) {
-          return true;
-        }
-      }
-
-      return false;
+      return await checkStoragePermissions();
     } catch (e, stackTrace) {
       debugPrint('Error requesting permissions: $e\n$stackTrace');
       return false;
@@ -76,18 +84,18 @@ class PermissionHelper {
     }
 
     try {
-      final videos = await Permission.videos.status;
-      final photos = await Permission.photos.status;
-      final audio = await Permission.audio.status;
-      final storage = await Permission.storage.status;
-      final manage = await Permission.manageExternalStorage.status;
+      final permissions = await _resolveStoragePermissions(
+        includeFallback: true,
+      );
 
-      return videos.isGranted ||
-          photos.isGranted ||
-          audio.isGranted ||
-          storage.isGranted ||
-          storage.isLimited ||
-          manage.isGranted;
+      for (final permission in permissions) {
+        final status = await permission.status;
+        if (_isGranted(status)) {
+          return true;
+        }
+      }
+
+      return false;
     } catch (e, stackTrace) {
       debugPrint('Error checking permissions: $e\n$stackTrace');
       return false;
@@ -96,5 +104,78 @@ class PermissionHelper {
 
   static Future<void> openSettings() async {
     await openAppSettings();
+  }
+
+  static Future<List<PermissionStatusDetail>>
+  getPermissionStatusDetails() async {
+    final List<PermissionStatusDetail> statuses = [];
+
+    for (final descriptor in _requiredPermissions) {
+      try {
+        final status = await descriptor.permission.status;
+        final granted = _isGranted(status);
+        statuses.add(
+          PermissionStatusDetail(
+            title: descriptor.title,
+            description: descriptor.description,
+            granted: granted,
+          ),
+        );
+      } catch (e) {
+        debugPrint('Error reading ${descriptor.permission}: $e');
+        statuses.add(
+          PermissionStatusDetail(
+            title: descriptor.title,
+            description: descriptor.description,
+            granted: false,
+          ),
+        );
+      }
+    }
+
+    return statuses;
+  }
+
+  static bool _isGranted(PermissionStatus status) {
+    return status.isGranted || status.isLimited;
+  }
+
+  static Future<List<Permission>> _resolveStoragePermissions({
+    bool includeFallback = false,
+  }) async {
+    final sdkInt = await _androidSdkInt();
+
+    if (sdkInt != null) {
+      if (sdkInt >= 33) {
+        return includeFallback
+            ? [Permission.videos, Permission.storage]
+            : [Permission.videos];
+      }
+      return [Permission.storage];
+    }
+
+    // If we cannot determine the SDK version, include both to be safe for checks
+    return includeFallback
+        ? [Permission.videos, Permission.storage]
+        : [Permission.videos];
+  }
+
+  static Future<int?> _androidSdkInt() async {
+    if (_cachedAndroidSdkInt != null) {
+      return _cachedAndroidSdkInt;
+    }
+
+    if (!Platform.isAndroid) {
+      return null;
+    }
+
+    try {
+      final androidInfo = await _deviceInfoPlugin.androidInfo;
+      _cachedAndroidSdkInt = androidInfo.version.sdkInt;
+      return _cachedAndroidSdkInt;
+    } catch (e) {
+      debugPrint('Error reading Android SDK version: $e');
+      return null;
+    }
   }
 }

@@ -133,10 +133,6 @@ class A2OrbitPlayerManager(
         getController(viewId)?.enterPiP()
     }
 
-    fun togglePiP(viewId: Int, enable: Boolean) {
-        getController(viewId)?.togglePiP(enable)
-    }
-
     fun lockRotation(viewId: Int, lock: Boolean) {
         getController(viewId)?.lockRotation(lock)
     }

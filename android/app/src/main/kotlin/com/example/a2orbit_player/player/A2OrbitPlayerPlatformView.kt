@@ -2,6 +2,7 @@ package com.example.a2orbit_player.player
 
 import android.app.Activity
 import android.content.Context
+import android.util.Log
 import android.view.View
 import androidx.lifecycle.LifecycleOwner
 import io.flutter.plugin.platform.PlatformView
@@ -20,6 +21,8 @@ class A2OrbitPlayerPlatformView(
     init {
         controller.attachView(playerView)
         playerView.bindPlayer(controller.player)
+        controller.player.playWhenReady = false
+        Log.d("A2OrbitPlayerPlatformView", "Player bound to PlayerView. Surface: ${playerView.playerView.videoSurfaceView?.isAttachedToWindow}")
     }
 
     override fun getView(): View = playerView

@@ -9,12 +9,15 @@ class MeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [Color(0xFFE3F2FD), Color(0xFFF5F7FA)],
-          stops: [0.0, 0.3],
+          colors: [
+            Theme.of(context).colorScheme.primaryContainer.withOpacity(0.35),
+            Theme.of(context).colorScheme.background,
+          ],
+          stops: const [0.0, 0.3],
         ),
       ),
       child: SingleChildScrollView(
@@ -22,39 +25,69 @@ class MeScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Padding(
-              padding: EdgeInsets.only(top: 20, bottom: 20),
+            Padding(
+              padding: const EdgeInsets.only(top: 20, bottom: 20),
               child: Text(
                 'Me',
                 style: TextStyle(
                   fontSize: 24,
                   fontWeight: FontWeight.bold,
-                  color: Colors.black87,
+                  color: Theme.of(context).colorScheme.onSurface,
                 ),
               ),
             ),
             // Main Grid Card
-            _buildCard([
+            _buildCard(context, [
               _buildGrid([
-                _buildGridItem(Icons.download_outlined, 'Downloads'),
+                _buildGridItem(context, Icons.download_outlined, 'Downloads'),
                 _buildGridItem(
+                  context,
                   Icons.swap_horizontal_circle_outlined,
                   'File Transfer',
                 ),
-                _buildGridItem(Icons.lock_person_outlined, 'Private Folder'),
-                _buildGridItem(Icons.playlist_play_outlined, 'Video Playlists'),
-                _buildGridItem(Icons.folder_open_outlined, 'Media Manager'),
-                _buildGridItem(Icons.computer_outlined, 'Local Network'),
-                _buildGridItem(Icons.language_outlined, 'Network Stream'),
-                _buildGridItem(Icons.cloud_queue_outlined, 'Cloud Drive'),
-                _buildGridItem(Icons.delete_outline_outlined, 'Recycle Bin'),
+                _buildGridItem(
+                  context,
+                  Icons.lock_person_outlined,
+                  'Private Folder',
+                ),
+                _buildGridItem(
+                  context,
+                  Icons.playlist_play_outlined,
+                  'Video Playlists',
+                ),
+                _buildGridItem(
+                  context,
+                  Icons.folder_open_outlined,
+                  'Media Manager',
+                ),
+                _buildGridItem(
+                  context,
+                  Icons.computer_outlined,
+                  'Local Network',
+                ),
+                _buildGridItem(
+                  context,
+                  Icons.language_outlined,
+                  'Network Stream',
+                ),
+                _buildGridItem(
+                  context,
+                  Icons.cloud_queue_outlined,
+                  'Cloud Drive',
+                ),
+                _buildGridItem(
+                  context,
+                  Icons.delete_outline_outlined,
+                  'Recycle Bin',
+                ),
               ]),
             ]),
             const SizedBox(height: 16),
 
             // WhatsApp Status Saver Card
-            _buildCard([
+            _buildCard(context, [
               _buildListTile(
+                context,
                 Icons.chat,
                 'WhatsApp Status Saver',
                 iconColor: Colors.green,
@@ -64,8 +97,9 @@ class MeScreen extends StatelessWidget {
             const SizedBox(height: 16),
 
             // Settings Group Card
-            _buildCard([
+            _buildCard(context, [
               _buildListTile(
+                context,
                 Icons.checkroom_outlined,
                 'App Theme',
                 onTap: () {
@@ -79,6 +113,7 @@ class MeScreen extends StatelessWidget {
               ),
               const Divider(height: 1, indent: 56),
               _buildListTile(
+                context,
                 Icons.settings_outlined,
                 'Settings',
                 onTap: () {
@@ -92,6 +127,7 @@ class MeScreen extends StatelessWidget {
               ),
               const Divider(height: 1, indent: 56),
               _buildListTile(
+                context,
                 Icons.picture_in_picture_alt_outlined,
                 'Custom Pop-up Play',
                 onTap: () {},
@@ -100,29 +136,37 @@ class MeScreen extends StatelessWidget {
             const SizedBox(height: 16),
 
             // Legal & Help Group Card
-            _buildCard([
-              _buildListTile(Icons.gavel_outlined, 'Legal', onTap: () {}),
+            _buildCard(context, [
+              _buildListTile(
+                context,
+                Icons.gavel_outlined,
+                'Legal',
+                onTap: () {},
+              ),
               const Divider(height: 1, indent: 56),
-              _buildListTile(Icons.help_outline, 'Help'),
+              _buildListTile(context, Icons.help_outline, 'Help'),
             ]),
             const SizedBox(height: 24), // Changed from 16 to 24
             // Developer Section
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Padding(
-                  padding: EdgeInsets.only(left: 8, bottom: 8),
+                Padding(
+                  padding: const EdgeInsets.only(left: 8, bottom: 8),
                   child: Text(
                     'Developer Information',
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
-                      color: Colors.black54,
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.onSurface.withOpacity(0.6),
                     ),
                   ),
                 ),
-                _buildCard([
+                _buildCard(context, [
                   _buildListTile(
+                    context,
                     Icons.person_outline,
                     'About Developer',
                     onTap: () {
@@ -144,10 +188,10 @@ class MeScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildCard(List<Widget> children) {
+  Widget _buildCard(BuildContext context, List<Widget> children) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
@@ -176,20 +220,20 @@ class MeScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildGridItem(IconData icon, String label) {
+  Widget _buildGridItem(BuildContext context, IconData icon, String label) {
     return InkWell(
       onTap: () {},
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, size: 30, color: const Color(0xFF2196F3)),
+          Icon(icon, size: 30, color: Theme.of(context).colorScheme.primary),
           const SizedBox(height: 8),
           Text(
             label,
             textAlign: TextAlign.center,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 12,
-              color: Colors.black87,
+              color: Theme.of(context).colorScheme.onSurface,
               fontWeight: FontWeight.w400,
             ),
           ),
@@ -199,18 +243,24 @@ class MeScreen extends StatelessWidget {
   }
 
   Widget _buildListTile(
+    BuildContext context,
     IconData icon,
     String title, {
     Color? iconColor,
     VoidCallback? onTap,
   }) {
     return ListTile(
-      leading: Icon(icon, color: iconColor ?? Colors.black54),
+      leading: Icon(
+        icon,
+        color:
+            iconColor ??
+            Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+      ),
       title: Text(
         title,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 15,
-          color: Colors.black87,
+          color: Theme.of(context).colorScheme.onSurface,
           fontWeight: FontWeight.w400,
         ),
       ),

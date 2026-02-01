@@ -21,7 +21,6 @@ object PlayerConstants {
         const val SET_AUDIO_DELAY = "setAudioDelay"
         const val SET_ASPECT_RATIO = "setAspectRatio"
         const val ENTER_PIP = "enterPiP"
-        const val TOGGLE_PIP = "togglePiP"
         const val LOCK_ROTATION = "lockRotation"
         const val GET_VIDEO_INFO = "getVideoInformation"
         const val ENABLE_GESTURES = "enableGestures"

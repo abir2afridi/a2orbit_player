@@ -24,11 +24,11 @@ class _HomeScreenState extends State<HomeScreen> {
     final bool hideDefaultAppBar = _currentIndex == 1 || _currentIndex == 3;
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.background,
       appBar: hideDefaultAppBar
           ? null
           : AppBar(
-              backgroundColor: Colors.white,
+              backgroundColor: Theme.of(context).colorScheme.surface,
               elevation: 0,
               title: _isSearching
                   ? TextField(
@@ -51,15 +51,17 @@ class _HomeScreenState extends State<HomeScreen> {
                         Text(
                           'A2Orbit Player',
                           style: GoogleFonts.raleway(
-                            color: Colors.black,
+                            color: Theme.of(context).colorScheme.onSurface,
                             fontWeight: FontWeight.bold,
                             fontSize: 22,
                           ),
                         ),
                         Text(
                           _currentIndex == 0 ? 'Local' : 'Transfer',
-                          style: const TextStyle(
-                            color: Colors.black54,
+                          style: TextStyle(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onSurface.withOpacity(0.6),
                             fontWeight: FontWeight.normal,
                             fontSize: 14,
                           ),
@@ -69,7 +71,12 @@ class _HomeScreenState extends State<HomeScreen> {
               actions: [
                 IconButton(
                   onPressed: () {},
-                  icon: const Icon(Icons.cast, color: Colors.black54),
+                  icon: Icon(
+                    Icons.cast,
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.onSurface.withOpacity(0.6),
+                  ),
                 ),
                 IconButton(
                   onPressed: () {
@@ -83,14 +90,21 @@ class _HomeScreenState extends State<HomeScreen> {
                   },
                   icon: Icon(
                     _isSearching ? Icons.close : Icons.search,
-                    color: Colors.black54,
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.onSurface.withOpacity(0.6),
                   ),
                 ),
                 IconButton(
                   onPressed: () {
                     // Toggle grid view logic
                   },
-                  icon: const Icon(Icons.grid_view, color: Colors.black54),
+                  icon: Icon(
+                    Icons.grid_view,
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.onSurface.withOpacity(0.6),
+                  ),
                   tooltip: 'Toggle Grid View',
                 ),
                 IconButton(
@@ -102,7 +116,12 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     );
                   },
-                  icon: const Icon(Icons.person_outline, color: Colors.black54),
+                  icon: Icon(
+                    Icons.person_outline,
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.onSurface.withOpacity(0.6),
+                  ),
                 ),
               ],
             ),
@@ -142,10 +161,12 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       bottomNavigationBar: BottomNavigationBar(
         elevation: 10,
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(context).colorScheme.surface,
         type: BottomNavigationBarType.fixed,
-        selectedItemColor: Colors.blue,
-        unselectedItemColor: Colors.grey,
+        selectedItemColor: Theme.of(context).colorScheme.primary,
+        unselectedItemColor: Theme.of(
+          context,
+        ).colorScheme.onSurface.withOpacity(0.6),
         currentIndex: _currentIndex,
         onTap: (index) {
           setState(() {
@@ -187,12 +208,12 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       child: Row(
         children: [
-          Icon(icon, size: 18, color: Colors.black87),
+          Icon(icon, size: 18, color: Theme.of(context).colorScheme.onSurface),
           const SizedBox(width: 8),
           Text(
             label,
-            style: const TextStyle(
-              color: Colors.black87,
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurface,
               fontWeight: FontWeight.w500,
               fontSize: 13,
             ),

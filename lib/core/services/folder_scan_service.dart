@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import '../utils/permission_helper.dart';
 
@@ -25,43 +26,73 @@ class FolderScanService {
     '/storage/emulated/0/Android',
   ];
 
-  /// Scans device storage and returns only folders that contain video files
-  /// Returns Map<folderPath, List<videoFiles>>
-  static Future<Map<String, List<File>>> scanFoldersWithVideos() async {
+  static Map<String, List<File>> _cachedFolders = {};
+  static Future<Map<String, List<File>>>? _ongoingScan;
+  static DateTime? _cacheTimestamp;
+  static const Duration _cacheTtl = Duration(minutes: 3);
+
+  static Map<String, List<File>> getCachedFolders() {
+    return _cloneFolderMap(_cachedFolders);
+  }
+
+  static void clearCache() {
+    _cachedFolders = {};
+    _cacheTimestamp = null;
+  }
+
+  /// Scans device storage and returns only folders that contain video files.
+  /// Results are cached to make subsequent loads instant unless [forceRefresh]
+  /// is requested.
+  static Future<Map<String, List<File>>> scanFoldersWithVideos({
+    bool forceRefresh = false,
+  }) async {
+    if (!forceRefresh && _isCacheValid()) {
+      return getCachedFolders();
+    }
+
+    final hasPermission = await PermissionHelper.checkStoragePermissions();
+    if (!hasPermission) {
+      return {};
+    }
+
+    if (_ongoingScan != null) {
+      final result = await _ongoingScan!;
+      return _cloneFolderMap(result);
+    }
+
+    _ongoingScan = _performFullScan();
+    try {
+      final result = await _ongoingScan!;
+      _cachedFolders = _cloneFolderMap(result);
+      _cacheTimestamp = DateTime.now();
+      return getCachedFolders();
+    } finally {
+      _ongoingScan = null;
+    }
+  }
+
+  static Future<Map<String, List<File>>> _performFullScan() async {
     final Map<String, List<File>> foldersWithVideos = {};
 
     try {
-      // Ensure permissions before attempting to scan
-      final hasPermission = await PermissionHelper.requestStoragePermissions();
-      if (!hasPermission) {
-        return foldersWithVideos;
-      }
-
-      // Get external storage directory
       final externalDir = await getExternalStorageDirectory();
       if (externalDir == null) return foldersWithVideos;
 
-      // Start from root of external storage
       final storagePath = externalDir.path.split('Android')[0];
       final storageDir = Directory(storagePath);
 
       if (!await storageDir.exists()) {
-        print('Storage directory not found: $storagePath');
+        debugPrint('Storage directory not found: $storagePath');
         return foldersWithVideos;
       }
 
-      print('Starting scan from: $storagePath');
-
-      // Scan recursively but collect only folders with videos
+      debugPrint('Starting scan from: $storagePath');
       await _scanDirectoryRecursive(storageDir, foldersWithVideos);
-
-      // Filter out parent folders that have subfolders with videos
       final filteredFolders = _filterLastLevelFolders(foldersWithVideos);
-
-      print('Found ${filteredFolders.length} folders with videos');
+      debugPrint('Found ${filteredFolders.length} folders with videos');
       return filteredFolders;
     } catch (e) {
-      print('Error scanning folders: $e');
+      debugPrint('Error scanning folders: $e');
       return foldersWithVideos;
     }
   }
@@ -100,7 +131,7 @@ class FolderScanService {
       // If this folder has videos, add it to our map
       if (videosInFolder.isNotEmpty) {
         foldersWithVideos[dir.path] = videosInFolder;
-        print('Found ${videosInFolder.length} videos in: ${dir.path}');
+        debugPrint('Found ${videosInFolder.length} videos in: ${dir.path}');
       }
 
       // Recursively scan subdirectories
@@ -108,7 +139,7 @@ class FolderScanService {
         await _scanDirectoryRecursive(subdir, foldersWithVideos);
       }
     } catch (e) {
-      print('Error scanning directory ${dir.path}: $e');
+      debugPrint('Error scanning directory ${dir.path}: $e');
     }
   }
 
@@ -187,5 +218,18 @@ class FolderScanService {
   /// Requests necessary permissions
   static Future<bool> requestPermissions() async {
     return PermissionHelper.requestStoragePermissions();
+  }
+
+  static bool _isCacheValid() {
+    if (_cachedFolders.isEmpty || _cacheTimestamp == null) {
+      return false;
+    }
+    return DateTime.now().difference(_cacheTimestamp!) < _cacheTtl;
+  }
+
+  static Map<String, List<File>> _cloneFolderMap(
+    Map<String, List<File>> source,
+  ) {
+    return source.map((key, value) => MapEntry(key, List<File>.from(value)));
   }
 }

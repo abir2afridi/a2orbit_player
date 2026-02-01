@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -8,10 +7,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/providers/app_providers.dart';
 import '../services/playback_history_service.dart';
-import 'native_player_controller.dart';
+import 'robust_player_controller.dart';
 
-class VideoPlayerWidget extends ConsumerStatefulWidget {
-  const VideoPlayerWidget({
+class RobustVideoPlayerWidget extends ConsumerStatefulWidget {
+  const RobustVideoPlayerWidget({
     super.key,
     required this.videoPath,
     this.autoPlay = true,
@@ -23,13 +22,15 @@ class VideoPlayerWidget extends ConsumerStatefulWidget {
   final VoidCallback? onVideoEnd;
 
   @override
-  ConsumerState<VideoPlayerWidget> createState() => _VideoPlayerWidgetState();
+  ConsumerState<RobustVideoPlayerWidget> createState() =>
+      _RobustVideoPlayerWidgetState();
 }
 
-class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
+class _RobustVideoPlayerWidgetState
+    extends ConsumerState<RobustVideoPlayerWidget>
     with WidgetsBindingObserver {
-  final NativePlayerController _nativeController = NativePlayerController();
-  StreamSubscription<NativePlayerEvent>? _eventSubscription;
+  final RobustPlayerController _robustController = RobustPlayerController();
+  StreamSubscription<RobustPlayerEvent>? _eventSubscription;
   ProviderSubscription<AppSettings>? _settingsSubscription;
   late PlaybackHistoryService _historyService;
 
@@ -46,8 +47,6 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   Duration? _resumePosition;
-  Duration _subtitleDelay = Duration.zero;
-  Duration _audioDelay = Duration.zero;
 
   bool _isPlaying = false;
 
@@ -70,7 +69,7 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
 
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
-    _eventSubscription = _nativeController.events.listen(_handleNativeEvent);
+    _eventSubscription = _robustController.events.listen(_handleRobustEvent);
     _settingsSubscription = ref.listenManual<AppSettings>(settingsProvider, (
       previous,
       next,
@@ -88,7 +87,7 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
     _sleepTimer?.cancel();
     _eventSubscription?.cancel();
     _settingsSubscription?.close();
-    _nativeController.dispose();
+    _robustController.dispose();
     SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     super.dispose();
   }
@@ -98,7 +97,6 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
     super.didChangeAppLifecycleState(state);
     switch (state) {
       case AppLifecycleState.resumed:
-        // App returned to foreground - restore controls visibility
         if (!mounted) return;
         setState(() {
           _showControls = true;
@@ -106,10 +104,8 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
         _restartHideControlsTimer();
         break;
       case AppLifecycleState.inactive:
-        // Temporary state (e.g., incoming call, dialog) - don't trigger PiP
         break;
       case AppLifecycleState.paused:
-        // App actually went to background - trigger Auto PiP if enabled
         _handleBackgroundBehavior(isPaused: true);
         break;
       case AppLifecycleState.detached:
@@ -119,7 +115,7 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
   }
 
   @override
-  void didUpdateWidget(covariant VideoPlayerWidget oldWidget) {
+  void didUpdateWidget(covariant RobustVideoPlayerWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.videoPath != widget.videoPath) {
       _resetStateForNewSource();
@@ -141,8 +137,6 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
     _resumePosition = null;
     _position = Duration.zero;
     _duration = Duration.zero;
-    _subtitleDelay = Duration.zero;
-    _audioDelay = Duration.zero;
     _isPlayerReady = false;
     _isPlaying = false;
     _hasError = false;
@@ -154,9 +148,6 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
   void _onSettingsChanged(AppSettings? previous, AppSettings next) {
     final prev = previous ?? _settings;
     _applySettings(next);
-    if (_isPlayerReady) {
-      _applyNativePreferences();
-    }
     if (prev?.sleepTimerMinutes != next.sleepTimerMinutes) {
       _configureSleepTimer(next);
     }
@@ -175,9 +166,10 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
     SystemChrome.setPreferredOrientations(orientations);
   }
 
-  void _handleNativeEvent(NativePlayerEvent event) {
+  void _handleRobustEvent(RobustPlayerEvent event) {
     if (!mounted) return;
-    if (event is NativePlaybackStateEvent) {
+
+    if (event is RobustPlaybackStateEvent) {
       final shouldShowControls = !event.isPlaying || event.isEnded;
       setState(() {
         _isPlaying = event.isPlaying && !event.isEnded;
@@ -196,12 +188,12 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
         _hideControlsTimer?.cancel();
       }
       return;
-    } else if (event is NativePositionEvent) {
+    } else if (event is RobustPositionEvent) {
       setState(() {
         _position = event.position;
         _duration = event.duration;
       });
-    } else if (event is NativeErrorEvent) {
+    } else if (event is RobustErrorEvent) {
       setState(() {
         _hasError = true;
         _isLoading = false;
@@ -211,19 +203,16 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
   }
 
   Future<void> _onPlatformViewCreated(int viewId) async {
-    _nativeController.attach(viewId);
+    _robustController.attach(viewId);
     try {
-      final subtitles = await _loadSubtitlePaths();
-      await _nativeController.setSource(widget.videoPath, subtitles: subtitles);
+      await _robustController.setSource(widget.videoPath);
 
       if (_resumePosition != null && _resumePosition! > Duration.zero) {
-        await _nativeController.seekTo(_resumePosition!);
+        await _robustController.seekTo(_resumePosition!);
       }
 
-      await _applyNativePreferences();
-
       if (widget.autoPlay) {
-        await _nativeController.play();
+        await _robustController.play();
       }
 
       if (!mounted) return;
@@ -246,24 +235,6 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
     }
   }
 
-  Future<void> _applyNativePreferences() async {
-    final settings = _settings;
-    if (settings == null) return;
-
-    await _nativeController.setPlaybackSpeed(settings.playbackSpeed);
-    await _nativeController.setGesturesEnabled(
-      settings.enableGestureSeek ||
-          settings.enableGestureVolume ||
-          settings.enableGestureBrightness,
-    );
-
-    await _nativeController.setDecoder(
-      settings.enableHardwareAcceleration
-          ? DecoderType.hardware
-          : DecoderType.software,
-    );
-  }
-
   void _handleBackgroundBehavior({required bool isPaused}) {
     final settings = _settings;
     if (settings == null) return;
@@ -271,20 +242,19 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
     if (isPaused) {
       switch (settings.backgroundPlayOption) {
         case BackgroundPlayOption.stop:
-          _nativeController.pause();
+          _robustController.pause();
           break;
         case BackgroundPlayOption.backgroundAudio:
-          // allow playback to continue in background
           break;
         case BackgroundPlayOption.pictureInPicture:
           if (settings.autoEnterPip) {
-            _nativeController.enterPictureInPicture();
+            _robustController.enterPictureInPicture();
           }
           break;
       }
     } else {
       if (widget.autoPlay && !_isPlaying) {
-        _nativeController.play();
+        _robustController.play();
       }
     }
   }
@@ -305,7 +275,7 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
       _sleepTimer = Timer(
         Duration(minutes: targetSettings.sleepTimerMinutes),
         () async {
-          await _nativeController.pause();
+          await _robustController.pause();
           if (!mounted) return;
           setState(() {
             _isPlaying = false;
@@ -353,9 +323,9 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
 
   void _togglePlayPause() {
     if (_isPlaying) {
-      _nativeController.pause();
+      _robustController.pause();
     } else {
-      _nativeController.play();
+      _robustController.play();
     }
     _restartHideControlsTimer();
   }
@@ -374,7 +344,7 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
     } else if (totalMs > 0 && clampedMs > totalMs) {
       clampedMs = totalMs;
     }
-    _nativeController.seekTo(Duration(milliseconds: clampedMs));
+    _robustController.seekTo(Duration(milliseconds: clampedMs));
   }
 
   void _handleDoubleTap(double tapX, double width) {
@@ -398,106 +368,45 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
       ),
     );
     if (result != null) {
-      await _nativeController.setPlaybackSpeed(result);
+      await _robustController.setPlaybackSpeed(result);
       ref
           .read(settingsProvider.notifier)
           .updateSetting('playback_speed', result);
     }
   }
 
-  Future<void> _showDecoderSelector() async {
-    final hardware = _settings?.enableHardwareAcceleration ?? true;
-    final result = await showModalBottomSheet<DecoderType>(
-      context: context,
-      builder: (context) => _OptionSheet<DecoderType>(
-        title: 'Decoder',
-        options: const [DecoderType.hardware, DecoderType.software],
-        formatter: (value) =>
-            value == DecoderType.hardware ? 'Hardware' : 'Software',
-        selected: hardware ? DecoderType.hardware : DecoderType.software,
-      ),
-    );
-    if (result != null) {
-      await _nativeController.setDecoder(result);
-      ref
-          .read(settingsProvider.notifier)
-          .updateSetting(
-            'hardware_acceleration',
-            result == DecoderType.hardware,
-          );
-    }
-  }
-
   Future<void> _showAspectRatioSelector() async {
-    final result = await showModalBottomSheet<AspectRatioMode>(
+    final result = await showModalBottomSheet<int>(
       context: context,
-      builder: (context) => _OptionSheet<AspectRatioMode>(
+      builder: (context) => _OptionSheet<int>(
         title: 'Aspect ratio',
-        options: const [
-          AspectRatioMode.fit,
-          AspectRatioMode.fixedWidth,
-          AspectRatioMode.fixedHeight,
-          AspectRatioMode.fill,
-          AspectRatioMode.zoom,
-        ],
+        options: const [0, 1, 2, 3, 4],
         formatter: (mode) {
           switch (mode) {
-            case AspectRatioMode.fit:
+            case 0:
               return 'Fit';
-            case AspectRatioMode.fixedWidth:
-              return '16:9';
-            case AspectRatioMode.fixedHeight:
-              return '4:3';
-            case AspectRatioMode.fill:
-              return 'Stretch';
-            case AspectRatioMode.zoom:
+            case 1:
+              return 'Fill';
+            case 2:
               return 'Zoom';
+            case 3:
+              return '16:9';
+            case 4:
+              return '4:3';
+            default:
+              return 'Unknown';
           }
         },
-        selected: AspectRatioMode.fit,
+        selected: 0,
       ),
     );
     if (result != null) {
-      await _nativeController.setAspectRatio(result);
+      await _robustController.setAspectRatio(result);
     }
-  }
-
-  Future<void> _openTracksSheet() async {
-    final audioTracks = await _nativeController.getAudioTracks();
-    final subtitleTracks = await _nativeController.getSubtitleTracks();
-
-    if (!mounted) return;
-
-    await showModalBottomSheet<void>(
-      context: context,
-      builder: (context) => _TracksSheet(
-        audioTracks: audioTracks,
-        subtitleTracks: subtitleTracks,
-        onAudioSelected: (track) {
-          _nativeController.switchAudioTrack(
-            track.groupIndex,
-            track.trackIndex,
-          );
-        },
-        onSubtitleSelected: (track) {
-          if (track == null) {
-            _nativeController.selectSubtitleTrack(
-              groupIndex: null,
-              trackIndex: null,
-            );
-          } else {
-            _nativeController.selectSubtitleTrack(
-              groupIndex: track.groupIndex,
-              trackIndex: track.trackIndex,
-            );
-          }
-        },
-      ),
-    );
   }
 
   Future<void> _showVideoInfo() async {
-    final info = await _nativeController.getVideoInformation();
+    final info = await _robustController.getVideoInformation();
     if (!mounted || info == null) return;
     showDialog<void>(
       context: context,
@@ -507,41 +416,44 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _InfoRow(label: 'Codec', value: info.videoCodec ?? 'Unknown'),
+            _InfoRow(
+              label: 'Codec',
+              value: info['videoCodec']?.toString() ?? 'Unknown',
+            ),
             _InfoRow(
               label: 'Resolution',
-              value: info.width != null && info.height != null
-                  ? '${info.width} x ${info.height}'
+              value: info['width'] != null && info['height'] != null
+                  ? '${info['width']} x ${info['height']}'
                   : 'Unknown',
             ),
             _InfoRow(
               label: 'Frame rate',
-              value: info.frameRate?.toStringAsFixed(2) ?? 'Unknown',
+              value: info['frameRate']?.toStringAsFixed(2) ?? 'Unknown',
             ),
-            _InfoRow(label: 'Audio', value: info.audioCodec ?? 'Unknown'),
+            _InfoRow(
+              label: 'Audio',
+              value: info['audioCodec']?.toString() ?? 'Unknown',
+            ),
             _InfoRow(
               label: 'Channels',
-              value: info.audioChannels?.toString() ?? 'Unknown',
+              value: info['audioChannels']?.toString() ?? 'Unknown',
             ),
             _InfoRow(
               label: 'Sample rate',
-              value: info.audioSampleRate != null
-                  ? '${info.audioSampleRate} Hz'
+              value: info['audioSampleRate'] != null
+                  ? '${info['audioSampleRate']} Hz'
                   : 'Unknown',
             ),
             _InfoRow(
               label: 'Duration',
               value: _formatDuration(
-                Duration(milliseconds: info.duration ?? 0),
+                Duration(milliseconds: info['duration'] ?? 0),
               ),
             ),
             _InfoRow(
-              label: 'Size',
-              value: info.size != null
-                  ? _formatFileSize(info.size!)
-                  : 'Unknown',
+              label: 'Path',
+              value: info['path']?.toString() ?? widget.videoPath,
             ),
-            _InfoRow(label: 'Path', value: info.path ?? widget.videoPath),
           ],
         ),
         actions: [
@@ -554,122 +466,15 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
     );
   }
 
-  Future<void> _showSleepTimerDialog() async {
-    const durations = [0, 15, 30, 45, 60, 90, 120];
-    final current = _settings?.sleepTimerMinutes ?? 0;
-    final result = await showModalBottomSheet<int>(
-      context: context,
-      builder: (context) => _OptionSheet<int>(
-        title: 'Sleep timer',
-        options: durations,
-        formatter: (minutes) => minutes == 0 ? 'Off' : '$minutes minutes',
-        selected: current,
-      ),
-    );
-    if (result != null) {
-      ref
-          .read(settingsProvider.notifier)
-          .updateSetting('sleep_timer_minutes', result);
-    }
-  }
-
-  void _adjustSubtitleDelay(bool increase) {
-    final delta = const Duration(milliseconds: 250);
-    setState(() {
-      _subtitleDelay += increase ? delta : -delta;
-    });
-    _nativeController.setSubtitleDelay(_subtitleDelay);
-  }
-
-  void _adjustAudioDelay(bool increase) {
-    final delta = const Duration(milliseconds: 250);
-    setState(() {
-      _audioDelay += increase ? delta : -delta;
-    });
-    _nativeController.setAudioDelay(_audioDelay);
-  }
-
-  // ===== GESTURE CONTROL STATE & METHODS =====
-
-  double _currentBrightness = 0.5;
-  double _currentVolume = 0.5;
-  Duration? _seekPreviewDelta;
-  bool _showGestureOverlay = false;
-  String _gestureType = '';
-
-  void _adjustBrightness(double delta) {
-    setState(() {
-      _currentBrightness = (_currentBrightness + delta).clamp(0.0, 1.0);
-      _showGestureOverlay = true;
-      _gestureType = 'brightness';
-    });
-
-    // Apply brightness change via platform channel
-    SystemChrome.setSystemUIOverlayStyle(
-      SystemUiOverlayStyle(
-        statusBarBrightness: _currentBrightness > 0.5
-            ? Brightness.light
-            : Brightness.dark,
-      ),
-    );
-
-    _restartHideControlsTimer();
-  }
-
-  void _adjustVolume(double delta) {
-    setState(() {
-      _currentVolume = (_currentVolume + delta).clamp(0.0, 1.0);
-      _showGestureOverlay = true;
-      _gestureType = 'volume';
-    });
-
-    // Volume adjustment feedback (actual volume control would use a plugin)
-    _restartHideControlsTimer();
-  }
-
-  void _showSeekPreview(Duration delta) {
-    setState(() {
-      _seekPreviewDelta = delta;
-      _showGestureOverlay = true;
-      _gestureType = 'seek';
-    });
-    _restartHideControlsTimer();
-  }
-
-  void _applySeekPreview() {
-    final delta = _seekPreviewDelta;
-    if (delta != null) {
-      _seekRelative(delta);
-    }
-    _hideGestureOverlay();
-  }
-
-  void _hideGestureOverlay() {
-    setState(() {
-      _showGestureOverlay = false;
-      _gestureType = '';
-      _seekPreviewDelta = null;
-    });
-  }
-
-  Future<List<String>> _loadSubtitlePaths() async {
-    final source = File(widget.videoPath);
-    if (!await source.exists()) return [];
-    final directory = source.parent;
-    final subtitleFiles = directory.listSync().whereType<File>().where((file) {
-      final lower = file.path.toLowerCase();
-      return lower.endsWith('.srt') ||
-          lower.endsWith('.ass') ||
-          lower.endsWith('.ssa');
-    }).toList()..sort((a, b) => a.path.compareTo(b.path));
-    return subtitleFiles.map((file) => file.path).toList();
+  String get _videoTitle {
+    return widget.videoPath.split('/').last;
   }
 
   Widget _buildBody() {
     final children = <Widget>[
       Positioned.fill(
         child: AndroidView(
-          viewType: 'com.a2orbit.player/texture',
+          viewType: 'com.a2orbit.player/robust_texture',
           onPlatformViewCreated: _onPlatformViewCreated,
           creationParams: {
             'source': widget.videoPath,
@@ -698,12 +503,9 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
       if (_isBuffering) {
         children.add(_buildBufferingIndicator());
       }
-      // Show lock indicator when locked
       if (_isLocked) {
         children.add(_buildLockIndicator());
       }
-      // Show gesture feedback overlay
-      children.add(_buildGestureOverlay());
     }
 
     return GestureDetector(
@@ -717,41 +519,6 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
         if (_isLocked) return;
         final width = MediaQuery.of(context).size.width;
         _handleDoubleTap(details.localPosition.dx, width);
-      },
-      onVerticalDragUpdate: (details) {
-        if (_isLocked) return;
-        final settings = _settings;
-        if (settings == null) return;
-
-        final screenWidth = MediaQuery.of(context).size.width;
-        final isLeftSide = details.localPosition.dx < screenWidth / 2;
-
-        // Normalize delta to 0-1 range (negative delta = swipe up = increase)
-        final delta = -details.primaryDelta! / 300;
-
-        if (isLeftSide && settings.enableGestureBrightness) {
-          _adjustBrightness(delta);
-        } else if (!isLeftSide && settings.enableGestureVolume) {
-          _adjustVolume(delta);
-        }
-      },
-      onVerticalDragEnd: (_) {
-        if (_isLocked) return;
-        _hideGestureOverlay();
-      },
-      onHorizontalDragUpdate: (details) {
-        if (_isLocked) return;
-        final settings = _settings;
-        if (settings == null || !settings.enableGestureSeek) return;
-
-        // Calculate seek delta based on horizontal drag
-        final delta = details.primaryDelta! / MediaQuery.of(context).size.width;
-        final seekMs = (delta * _duration.inMilliseconds).round();
-        _showSeekPreview(Duration(milliseconds: seekMs));
-      },
-      onHorizontalDragEnd: (details) {
-        if (_isLocked) return;
-        _applySeekPreview();
       },
       child: Stack(children: children),
     );
@@ -798,22 +565,12 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
               ),
             ),
             IconButton(
-              onPressed: _openTracksSheet,
-              icon: const Icon(Icons.subtitles, color: Colors.white),
+              onPressed: _showAspectRatioSelector,
+              icon: const Icon(Icons.aspect_ratio, color: Colors.white),
             ),
             IconButton(
-              onPressed: _showDecoderSelector,
-              icon: const Icon(
-                Icons.settings_input_component,
-                color: Colors.white,
-              ),
-            ),
-            IconButton(
-              onPressed: _enterPictureInPicture,
-              icon: const Icon(
-                Icons.picture_in_picture_alt,
-                color: Colors.white,
-              ),
+              onPressed: _showVideoInfo,
+              icon: const Icon(Icons.info_outline, color: Colors.white),
             ),
             IconButton(
               onPressed: _toggleLock,
@@ -873,7 +630,7 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
                 max: math.max(durationMs, 1),
                 value: positionMs,
                 onChanged: (value) {
-                  _nativeController.seekTo(
+                  _robustController.seekTo(
                     Duration(milliseconds: value.round()),
                   );
                 },
@@ -886,30 +643,6 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
                   style: const TextStyle(color: Colors.white70, fontSize: 12),
                 ),
                 const Spacer(),
-                IconButton(
-                  onPressed: () => _adjustSubtitleDelay(false),
-                  icon: const Icon(Icons.subtitles_off, color: Colors.white),
-                ),
-                Text(
-                  '${(_subtitleDelay.inMilliseconds / 1000).toStringAsFixed(1)}s',
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
-                ),
-                IconButton(
-                  onPressed: () => _adjustSubtitleDelay(true),
-                  icon: const Icon(Icons.subtitles, color: Colors.white),
-                ),
-                IconButton(
-                  onPressed: () => _adjustAudioDelay(false),
-                  icon: const Icon(Icons.volume_down, color: Colors.white),
-                ),
-                Text(
-                  '${(_audioDelay.inMilliseconds / 1000).toStringAsFixed(1)}s',
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
-                ),
-                IconButton(
-                  onPressed: () => _adjustAudioDelay(true),
-                  icon: const Icon(Icons.volume_up, color: Colors.white),
-                ),
                 PopupMenuButton<String>(
                   icon: const Icon(Icons.more_vert, color: Colors.white),
                   onSelected: (value) {
@@ -923,12 +656,6 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
                       case 'info':
                         _showVideoInfo();
                         break;
-                      case 'sleep':
-                        _showSleepTimerDialog();
-                        break;
-                      case 'pip':
-                        _enterPictureInPicture();
-                        break;
                     }
                   },
                   itemBuilder: (context) => const [
@@ -938,11 +665,6 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
                     ),
                     PopupMenuItem(value: 'ratio', child: Text('Aspect ratio')),
                     PopupMenuItem(value: 'info', child: Text('Video info')),
-                    PopupMenuItem(value: 'sleep', child: Text('Sleep timer')),
-                    PopupMenuItem(
-                      value: 'pip',
-                      child: Text('Picture-in-Picture'),
-                    ),
                   ],
                 ),
               ],
@@ -1026,101 +748,9 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
     );
   }
 
-  void _enterPictureInPicture() {
-    _nativeController.enterPictureInPicture();
-  }
-
-  String get _videoTitle => File(widget.videoPath).uri.pathSegments.last;
-
-  String _formatDuration(Duration duration) {
-    if (duration <= Duration.zero) return '00:00';
-    final hours = duration.inHours;
-    final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
-    if (hours > 0) {
-      return '$hours:$minutes:$seconds';
-    }
-    return '$minutes:$seconds';
-  }
-
-  String _formatFileSize(int bytes) {
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    var value = bytes.toDouble();
-    var index = 0;
-    while (value >= 1024 && index < units.length - 1) {
-      value /= 1024;
-      index++;
-    }
-    return '${value.toStringAsFixed(1)} ${units[index]}';
-  }
-
   Widget _buildLockIndicator() {
-    return Positioned(
-      top: MediaQuery.of(context).padding.top + 16,
-      right: 16,
-      child: GestureDetector(
-        onTap: _toggleLock,
-        child: Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.6),
-            shape: BoxShape.circle,
-          ),
-          child: const Icon(Icons.lock, color: Colors.white, size: 24),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildGestureOverlay() {
-    if (!_showGestureOverlay) return const SizedBox.shrink();
-
-    IconData icon;
-    String text;
-
-    switch (_gestureType) {
-      case 'brightness':
-        icon = Icons.brightness_6;
-        text = '${(_currentBrightness * 100).round()}%';
-        break;
-      case 'volume':
-        icon = _currentVolume == 0 ? Icons.volume_off : Icons.volume_up;
-        text = '${(_currentVolume * 100).round()}%';
-        break;
-      case 'seek':
-        final delta = _seekPreviewDelta;
-        if (delta == null) return const SizedBox.shrink();
-        icon = delta.isNegative ? Icons.fast_rewind : Icons.fast_forward;
-        final seconds = delta.inSeconds.abs();
-        text = '${delta.isNegative ? '-' : '+'}$seconds s';
-        break;
-      default:
-        return const SizedBox.shrink();
-    }
-
-    return Center(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-        decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.8),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: Colors.white, size: 48),
-            const SizedBox(height: 8),
-            Text(
-              text,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ],
-        ),
-      ),
+    return const Positioned.fill(
+      child: Center(child: Icon(Icons.lock, color: Colors.white70, size: 48)),
     );
   }
 
@@ -1138,17 +768,14 @@ class _RoundIconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkResponse(
-      onTap: onPressed,
-      radius: 36,
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.black45,
-          shape: BoxShape.circle,
-          border: Border.all(color: Colors.white24),
-        ),
-        child: Icon(icon, color: Colors.white),
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.black54,
+        shape: BoxShape.circle,
+      ),
+      child: IconButton(
+        onPressed: onPressed,
+        icon: Icon(icon, color: Colors.white, size: 28),
       ),
     );
   }
@@ -1162,20 +789,17 @@ class _PlayPauseButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkResponse(
-      onTap: onPressed,
-      radius: 40,
-      child: Container(
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
-          color: Colors.black54,
-          shape: BoxShape.circle,
-          border: Border.all(color: Colors.white30, width: 1.6),
-        ),
-        child: Icon(
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.black54,
+        shape: BoxShape.circle,
+      ),
+      child: IconButton(
+        onPressed: onPressed,
+        icon: Icon(
           isPlaying ? Icons.pause : Icons.play_arrow,
-          size: 42,
           color: Colors.white,
+          size: 48,
         ),
       ),
     );
@@ -1192,96 +816,31 @@ class _OptionSheet<T> extends StatelessWidget {
 
   final String title;
   final List<T> options;
-  final String Function(T value) formatter;
+  final String Function(T) formatter;
   final T selected;
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 16),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Text(title, style: Theme.of(context).textTheme.titleMedium),
+          Text(
+            title,
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
           ),
+          const SizedBox(height: 16),
           ...options.map(
-            (option) => RadioListTile<T>(
-              value: option,
-              groupValue: selected,
-              onChanged: (value) => Navigator.of(context).pop(value),
+            (option) => ListTile(
               title: Text(formatter(option)),
+              trailing: option == selected
+                  ? const Icon(Icons.check, color: Colors.blue)
+                  : null,
+              onTap: () => Navigator.of(context).pop(option),
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _TracksSheet extends StatelessWidget {
-  const _TracksSheet({
-    required this.audioTracks,
-    required this.subtitleTracks,
-    required this.onAudioSelected,
-    required this.onSubtitleSelected,
-  });
-
-  final List<NativeAudioTrack> audioTracks;
-  final List<NativeSubtitleTrack> subtitleTracks;
-  final ValueChanged<NativeAudioTrack> onAudioSelected;
-  final ValueChanged<NativeSubtitleTrack?> onSubtitleSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Audio tracks',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 8),
-            if (audioTracks.isEmpty)
-              const Text('No alternate audio tracks found.'),
-            ...audioTracks.map(
-              (track) => ListTile(
-                leading: const Icon(Icons.audiotrack),
-                title: Text(track.label),
-                subtitle: Text(track.language),
-                onTap: () {
-                  onAudioSelected(track);
-                  Navigator.of(context).pop();
-                },
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text('Subtitles', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            ListTile(
-              leading: const Icon(Icons.visibility_off),
-              title: const Text('None'),
-              onTap: () {
-                onSubtitleSelected(null);
-                Navigator.of(context).pop();
-              },
-            ),
-            ...subtitleTracks.map(
-              (track) => ListTile(
-                leading: const Icon(Icons.subtitles),
-                title: Text(track.label),
-                subtitle: Text(track.language),
-                onTap: () {
-                  onSubtitleSelected(track);
-                  Navigator.of(context).pop();
-                },
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -1301,20 +860,28 @@ class _InfoRow extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 110,
+            width: 100,
             child: Text(
-              label,
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
+              '$label:',
+              style: const TextStyle(fontWeight: FontWeight.w600),
             ),
           ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(value, style: Theme.of(context).textTheme.bodySmall),
-          ),
+          Expanded(child: Text(value)),
         ],
       ),
     );
+  }
+}
+
+String _formatDuration(Duration duration) {
+  final totalSeconds = duration.inSeconds;
+  final seconds = totalSeconds % 60;
+  final minutes = (totalSeconds / 60).floor() % 60;
+  final hours = (totalSeconds / 3600).floor();
+
+  if (hours > 0) {
+    return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+  } else {
+    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
   }
 }

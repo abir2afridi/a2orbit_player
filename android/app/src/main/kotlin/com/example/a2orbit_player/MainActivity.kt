@@ -181,15 +181,6 @@ class MainActivity : FlutterActivity() {
                 manager.enterPiP(viewId)
                 result.success(null)
             }
-            PlayerConstants.Methods.TOGGLE_PIP -> {
-                val enable = call.argument<Boolean>("enable")
-                if (viewId == null || enable == null) {
-                    result.error("invalid_args", "viewId and enable required", null)
-                    return
-                }
-                manager.togglePiP(viewId, enable)
-                result.success(null)
-            }
             PlayerConstants.Methods.LOCK_ROTATION -> {
                 val lock = call.argument<Boolean>("lock")
                 if (viewId == null || lock == null) {

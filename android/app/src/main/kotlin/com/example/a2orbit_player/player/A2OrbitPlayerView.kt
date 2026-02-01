@@ -1,6 +1,7 @@
 package com.example.a2orbit_player.player
 
 import android.content.Context
+import android.util.Log
 import android.util.AttributeSet
 import android.view.GestureDetector
 import android.view.MotionEvent
@@ -76,6 +77,7 @@ class A2OrbitPlayerView @JvmOverloads constructor(
 
     fun bindPlayer(player: androidx.media3.common.Player?) {
         playerView.player = player
+        Log.d("A2OrbitPlayerView", "bindPlayer: player=$player, surface=${playerView.videoSurfaceView?.isAttachedToWindow}")
     }
 
     fun setResizeMode(resizeMode: Int) {

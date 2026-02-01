@@ -1,7 +1,9 @@
 import 'dart:io';
+
 import 'package:flutter/material.dart';
-import 'package:permission_handler/permission_handler.dart';
+
 import '../../../core/services/folder_scan_service.dart';
+import '../../../core/utils/permission_helper.dart';
 import 'video_list_screen.dart';
 
 class FileBrowserScreen extends StatefulWidget {
@@ -21,13 +23,19 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
   Map<String, List<File>> _foldersWithVideos = {};
   List<String> _filteredFolderPaths = [];
   bool _isLoading = true;
+  bool _isRefreshing = false;
   bool _isGridView = false;
   String _searchQuery = '';
+  bool _isPermissionDialogVisible = false;
 
   @override
   void initState() {
     super.initState();
-    _requestPermissionsAndScanFolders();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _initializePermissionFlow();
+      }
+    });
   }
 
   @override
@@ -38,28 +46,66 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
     }
   }
 
-  Future<void> _requestPermissionsAndScanFolders() async {
-    setState(() {
-      _isLoading = true;
-    });
+  Future<void> _initializePermissionFlow() async {
+    final hasPermission = await PermissionHelper.checkStoragePermissions();
+
+    if (!mounted) return;
+
+    if (!hasPermission) {
+      setState(() {
+        _isLoading = false;
+        _isRefreshing = false;
+        _foldersWithVideos = {};
+        _filteredFolderPaths = [];
+      });
+      await _showPermissionGateDialog();
+      return;
+    }
+
+    await _loadFolders();
+  }
+
+  Future<void> _loadFolders({bool forceRefresh = false}) async {
+    final cached = FolderScanService.getCachedFolders();
+    final hasCachedData = cached.isNotEmpty;
+
+    if (mounted) {
+      setState(() {
+        if (hasCachedData && !forceRefresh) {
+          _foldersWithVideos = cached;
+          _filteredFolderPaths = cached.keys.toList();
+          _isLoading = false;
+        } else {
+          _isLoading = true;
+        }
+        _isRefreshing = true;
+      });
+    }
 
     try {
-      // Request permissions first
-      final hasPermission = await FolderScanService.requestPermissions();
+      final hasPermission = await PermissionHelper.checkStoragePermissions();
 
       if (!hasPermission) {
-        _showPermissionDialog();
+        if (mounted) {
+          setState(() {
+            _isRefreshing = false;
+            _isLoading = _foldersWithVideos.isEmpty;
+          });
+        }
+        await _showPermissionGateDialog();
         return;
       }
 
-      // Scan folders with videos
-      final foldersWithVideos = await FolderScanService.scanFoldersWithVideos();
+      final foldersWithVideos = await FolderScanService.scanFoldersWithVideos(
+        forceRefresh: forceRefresh,
+      );
 
       if (mounted) {
         setState(() {
           _foldersWithVideos = foldersWithVideos;
           _filteredFolderPaths = foldersWithVideos.keys.toList();
           _isLoading = false;
+          _isRefreshing = false;
         });
       }
     } catch (e) {
@@ -68,7 +114,8 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
     } finally {
       if (mounted) {
         setState(() {
-          _isLoading = false;
+          _isLoading = _foldersWithVideos.isEmpty;
+          _isRefreshing = false;
         });
       }
     }
@@ -108,58 +155,118 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
     );
   }
 
-  void _showPermissionDialog() {
-    showDialog(
+  Future<void> _showPermissionGateDialog() async {
+    if (!mounted || _isPermissionDialogVisible) {
+      return;
+    }
+
+    _isPermissionDialogVisible = true;
+    final permissionDetails =
+        await PermissionHelper.getPermissionStatusDetails();
+
+    if (!mounted) {
+      _isPermissionDialogVisible = false;
+      return;
+    }
+
+    await showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('Storage Permission Required'),
-        content: const Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'A2Orbit Player needs storage permission to browse and play your video files.',
-              style: TextStyle(fontSize: 14),
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Storage Permission Required'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'A2Orbit Player needs access to your device storage to browse and play offline videos. Grant the following permissions to continue:',
+                  style: TextStyle(fontSize: 14),
+                ),
+                const SizedBox(height: 16),
+                ...permissionDetails.map(
+                  (detail) => Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          detail.granted
+                              ? Icons.check_circle
+                              : Icons.radio_button_unchecked,
+                          size: 20,
+                          color: detail.granted
+                              ? Theme.of(dialogContext).colorScheme.primary
+                              : Theme.of(dialogContext).colorScheme.outline,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                detail.title,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: Theme.of(
+                                    dialogContext,
+                                  ).colorScheme.onSurface,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                detail.description,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Theme.of(
+                                    dialogContext,
+                                  ).colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
-            SizedBox(height: 12),
-            Text(
-              'Without this permission, the app cannot:',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+          ),
+          actionsPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 12,
+          ),
+          actions: [
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () async {
+                  Navigator.of(dialogContext).pop();
+                  await _handleAllowAllPressed();
+                },
+                child: const Text('Allow All'),
+              ),
             ),
-            SizedBox(height: 8),
-            Text(
-              '• Browse your device storage',
-              style: TextStyle(fontSize: 12),
-            ),
-            Text('• Access video files', style: TextStyle(fontSize: 12)),
-            Text('• Play media content', style: TextStyle(fontSize: 12)),
           ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              // Try requesting permissions again
-              _requestPermissionsAndScanFolders();
-            },
-            child: const Text('Grant Permission'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              // Open app settings
-              openAppSettings();
-            },
-            child: const Text('Open Settings'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-        ],
-      ),
-    );
+        );
+      },
+    ).whenComplete(() {
+      _isPermissionDialogVisible = false;
+    });
+  }
+
+  Future<void> _handleAllowAllPressed() async {
+    final granted = await PermissionHelper.requestStoragePermissions();
+
+    if (!mounted) return;
+
+    if (granted) {
+      await _loadFolders(forceRefresh: true);
+    } else {
+      await _showPermissionGateDialog();
+    }
   }
 
   void _showErrorDialog(String message) {
@@ -182,6 +289,8 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
   Widget build(BuildContext context) {
     final content = Column(
       children: [
+        if (_isRefreshing && !_isLoading)
+          const LinearProgressIndicator(minHeight: 2),
         Expanded(
           child: _isLoading
               ? const Center(child: CircularProgressIndicator())
@@ -202,13 +311,13 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
       appBar: AppBar(
         title: Text(
           'Folders (${_filteredFolderPaths.length})',
-          style: const TextStyle(
+          style: TextStyle(
             fontWeight: FontWeight.bold,
-            color: Colors.black87,
+            color: Theme.of(context).colorScheme.onSurface,
           ),
         ),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black87,
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        foregroundColor: Theme.of(context).colorScheme.onSurface,
         elevation: 0,
         actions: [
           IconButton(
@@ -247,12 +356,12 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
           const SizedBox(height: 16),
           if (_searchQuery.isEmpty)
             ElevatedButton.icon(
-              onPressed: _requestPermissionsAndScanFolders,
+              onPressed: () => _loadFolders(forceRefresh: true),
               icon: const Icon(Icons.refresh),
               label: const Text('Rescan'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue,
-                foregroundColor: Colors.white,
+                backgroundColor: Theme.of(context).colorScheme.primary,
+                foregroundColor: Theme.of(context).colorScheme.onPrimary,
               ),
             ),
         ],
@@ -309,7 +418,9 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
           width: 56,
           height: 56,
           decoration: BoxDecoration(
-            color: Colors.blue[50],
+            color: Theme.of(
+              context,
+            ).colorScheme.primaryContainer.withOpacity(0.3),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Stack(
@@ -317,7 +428,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
               Center(
                 child: Icon(
                   Icons.folder_rounded,
-                  color: Colors.blue[700],
+                  color: Theme.of(context).colorScheme.primary,
                   size: 32,
                 ),
               ),
@@ -344,10 +455,10 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
         ),
         title: Text(
           folderName,
-          style: const TextStyle(
+          style: TextStyle(
             fontWeight: FontWeight.w600,
             fontSize: 16,
-            color: Colors.black87,
+            color: Theme.of(context).colorScheme.onSurface,
           ),
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
@@ -405,7 +516,9 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
               child: Container(
                 width: double.infinity,
                 decoration: BoxDecoration(
-                  color: Colors.blue[50],
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.primaryContainer.withOpacity(0.3),
                   borderRadius: const BorderRadius.vertical(
                     top: Radius.circular(16),
                   ),
@@ -415,7 +528,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
                     Center(
                       child: Icon(
                         Icons.folder_rounded,
-                        color: Colors.blue[700],
+                        color: Theme.of(context).colorScheme.primary,
                         size: 48,
                       ),
                     ),

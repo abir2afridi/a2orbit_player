@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_strings.dart';
-import '../../../core/constants/app_colors.dart';
 import '../../../core/providers/app_providers.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -322,7 +321,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             title,
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.bold,
-              color: AppColors.lightPrimary,
+              color: Theme.of(context).colorScheme.primary,
             ),
           ),
         ),
@@ -348,7 +347,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       subtitle: Text(subtitle),
       value: value,
       onChanged: onChanged,
-      activeColor: AppColors.lightPrimary,
+      activeColor: Theme.of(context).colorScheme.primary,
     );
   }
 
@@ -371,7 +370,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           min: min,
           max: max,
           divisions: divisions,
-          activeColor: AppColors.lightPrimary,
+          activeColor: Theme.of(context).colorScheme.primary,
           onChanged: onChanged,
         ),
       ),

@@ -8,11 +8,12 @@ class NativePlayerController {
   static const String _eventChannelName = 'com.a2orbit.player/events';
 
   static const MethodChannel _methodChannel = MethodChannel(_methodChannelName);
-  static final Stream<dynamic> _eventBroadcastStream = const EventChannel(_eventChannelName)
-      .receiveBroadcastStream()
-      .asBroadcastStream();
+  static final Stream<dynamic> _eventBroadcastStream = const EventChannel(
+    _eventChannelName,
+  ).receiveBroadcastStream().asBroadcastStream();
 
-  final StreamController<NativePlayerEvent> _eventController = StreamController.broadcast();
+  final StreamController<NativePlayerEvent> _eventController =
+      StreamController.broadcast();
   StreamSubscription<dynamic>? _eventSubscription;
 
   int? _viewId;
@@ -36,18 +37,30 @@ class NativePlayerController {
     _viewId = null;
     if (viewId != null) {
       try {
-        await _methodChannel.invokeMethod<void>('disposePlayer', {'viewId': viewId});
+        await _methodChannel.invokeMethod<void>('disposePlayer', {
+          'viewId': viewId,
+        });
       } catch (_) {
         // Native side may already be disposed; ignore.
       }
     }
   }
 
-  Future<void> setSource(String path, {List<String> subtitles = const []}) async {
-    await _invoke<void>('setDataSource', {'path': path, 'subtitles': subtitles});
+  Future<void> setSource(
+    String path, {
+    List<String> subtitles = const [],
+  }) async {
+    await _invoke<void>('setDataSource', {
+      'path': path,
+      'subtitles': subtitles,
+    });
   }
 
-  Future<void> play() async => _invoke<void>('play');
+  Future<void> play() async {
+    await _invoke<void>('play');
+    // Wait for a short confirmation window so UI can detect immediate failures
+    await Future.delayed(const Duration(milliseconds: 50));
+  }
 
   Future<void> pause() async => _invoke<void>('pause');
 
@@ -70,7 +83,10 @@ class NativePlayerController {
   }
 
   Future<void> switchAudioTrack(int groupIndex, int trackIndex) async =>
-      _invoke<void>('switchAudioTrack', {'groupIndex': groupIndex, 'trackIndex': trackIndex});
+      _invoke<void>('switchAudioTrack', {
+        'groupIndex': groupIndex,
+        'trackIndex': trackIndex,
+      });
 
   Future<List<NativeSubtitleTrack>> getSubtitleTracks() async {
     final result = await _invoke<List<dynamic>>('getSubtitleTracks');
@@ -81,7 +97,10 @@ class NativePlayerController {
         .toList(growable: false);
   }
 
-  Future<void> selectSubtitleTrack({required int? groupIndex, required int? trackIndex}) async {
+  Future<void> selectSubtitleTrack({
+    required int? groupIndex,
+    required int? trackIndex,
+  }) async {
     await _invoke<void>('selectSubtitleTrack', {
       'groupIndex': groupIndex,
       'trackIndex': trackIndex,
@@ -98,9 +117,6 @@ class NativePlayerController {
       _invoke<void>('setAspectRatio', {'resizeMode': mode.nativeValue});
 
   Future<void> enterPictureInPicture() async => _invoke<void>('enterPiP');
-
-  Future<void> setAutoPiPEnabled(bool enabled) async =>
-      _invoke<void>('togglePiP', {'enable': enabled});
 
   Future<void> lockRotation(bool lock) async =>
       _invoke<void>('lockRotation', {'lock': lock});
@@ -126,18 +142,28 @@ class NativePlayerController {
       case 'playbackState':
         final state = (event['state'] as num?)?.toInt() ?? 0;
         final playing = event['playing'] as bool? ?? false;
-        _eventController.add(NativePlaybackStateEvent(state: state, isPlaying: playing));
+        _eventController.add(
+          NativePlaybackStateEvent(state: state, isPlaying: playing),
+        );
         break;
       case 'position':
-        final position = Duration(milliseconds: (event['position'] as num?)?.toInt() ?? 0);
-        final duration = Duration(milliseconds: (event['duration'] as num?)?.toInt() ?? 0);
-        _eventController.add(NativePositionEvent(position: position, duration: duration));
+        final position = Duration(
+          milliseconds: (event['position'] as num?)?.toInt() ?? 0,
+        );
+        final duration = Duration(
+          milliseconds: (event['duration'] as num?)?.toInt() ?? 0,
+        );
+        _eventController.add(
+          NativePositionEvent(position: position, duration: duration),
+        );
         break;
       case 'error':
-        _eventController.add(NativeErrorEvent(
-          code: event['code']?.toString() ?? 'unknown',
-          message: event['message']?.toString() ?? 'Unknown error',
-        ));
+        _eventController.add(
+          NativeErrorEvent(
+            code: event['code']?.toString() ?? 'unknown',
+            message: event['message']?.toString() ?? 'Unknown error',
+          ),
+        );
         break;
       case 'trackChanged':
         _eventController.add(const NativeTracksChangedEvent());
@@ -184,7 +210,10 @@ abstract class NativePlayerEvent {
 }
 
 class NativePlaybackStateEvent extends NativePlayerEvent {
-  const NativePlaybackStateEvent({required this.state, required this.isPlaying});
+  const NativePlaybackStateEvent({
+    required this.state,
+    required this.isPlaying,
+  });
 
   /// Matches ExoPlayer playback state constants.
   final int state;
@@ -227,7 +256,8 @@ class NativeAudioTrack {
     required this.label,
   });
 
-  factory NativeAudioTrack.fromMap(Map<dynamic, dynamic> map) => NativeAudioTrack(
+  factory NativeAudioTrack.fromMap(Map<dynamic, dynamic> map) =>
+      NativeAudioTrack(
         groupIndex: (map['groupIndex'] as num?)?.toInt() ?? 0,
         trackIndex: (map['trackIndex'] as num?)?.toInt() ?? 0,
         id: map['id']?.toString() ?? '',
@@ -250,7 +280,8 @@ class NativeSubtitleTrack {
     required this.label,
   });
 
-  factory NativeSubtitleTrack.fromMap(Map<dynamic, dynamic> map) => NativeSubtitleTrack(
+  factory NativeSubtitleTrack.fromMap(Map<dynamic, dynamic> map) =>
+      NativeSubtitleTrack(
         groupIndex: (map['groupIndex'] as num?)?.toInt() ?? 0,
         trackIndex: (map['trackIndex'] as num?)?.toInt() ?? 0,
         language: map['language']?.toString() ?? 'Unknown',
@@ -277,7 +308,8 @@ class NativeVideoInformation {
     this.path,
   });
 
-  factory NativeVideoInformation.fromMap(Map<dynamic, dynamic> map) => NativeVideoInformation(
+  factory NativeVideoInformation.fromMap(Map<dynamic, dynamic> map) =>
+      NativeVideoInformation(
         videoCodec: map['videoCodec']?.toString(),
         width: (map['width'] as num?)?.toInt(),
         height: (map['height'] as num?)?.toInt(),

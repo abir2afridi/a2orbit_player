@@ -4,7 +4,6 @@ import 'package:local_auth/local_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../features/privacy/services/privacy_service.dart';
-import '../constants/app_constants.dart';
 
 // SharedPreferences Provider
 final sharedPreferencesProvider = Provider<SharedPreferences>((ref) {
@@ -423,35 +422,33 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     _prefs = ref.read(sharedPreferencesProvider);
 
     state = AppSettings(
-      themeMode: _prefs.getString('theme_mode') ?? 'system',
+      themeMode: _readString('theme_mode') ?? 'system',
       backgroundPlayOption: BackgroundPlayOptionX.fromKey(
-        _prefs.getString('background_play_option') ?? 'background_audio',
+        _readString('background_play_option') ?? 'background_audio',
       ),
-      enableScreenOffPlayback: _prefs.getBool('screen_off_playback') ?? true,
-      autoEnterPip: _prefs.getBool('auto_enter_pip') ?? true,
-      audioOnly: _prefs.getBool('audio_only') ?? false,
-      volumeBoost: _prefs.getBool('volume_boost') ?? false,
-      playbackSpeed: _prefs.getDouble('playback_speed') ?? 1.0,
-      seekDuration: _prefs.getInt('seek_duration') ?? 10000,
-      sleepTimerMinutes: _prefs.getInt('sleep_timer_minutes') ?? 0,
-      enableABRepeat: _prefs.getBool('enable_ab_repeat') ?? false,
-      showGesturesHints: _prefs.getBool('show_gestures_hints') ?? true,
-      autoRotate: _prefs.getBool('auto_rotate') ?? true,
-      gestureOneHandMode: _prefs.getBool('gesture_one_hand') ?? false,
-      enableGestureSeek: _prefs.getBool('gesture_seek') ?? true,
-      enableGestureBrightness: _prefs.getBool('gesture_brightness') ?? true,
-      enableGestureVolume: _prefs.getBool('gesture_volume') ?? true,
-      keepScreenOn: _prefs.getBool('keep_screen_on') ?? true,
-      resumePlayback: _prefs.getBool('resume_playback') ?? true,
-      subtitleFontSize: _prefs.getDouble('subtitle_font_size') ?? 16.0,
-      subtitleTextColor: _prefs.getInt('subtitle_text_color') ?? 0xFFFFFFFF,
+      enableScreenOffPlayback: _readBool('screen_off_playback') ?? true,
+      autoEnterPip: _readBool('auto_enter_pip') ?? true,
+      audioOnly: _readBool('audio_only') ?? false,
+      volumeBoost: _readBool('volume_boost') ?? false,
+      playbackSpeed: _readDouble('playback_speed') ?? 1.0,
+      seekDuration: _readInt('seek_duration') ?? 10000,
+      sleepTimerMinutes: _readInt('sleep_timer_minutes') ?? 0,
+      enableABRepeat: _readBool('enable_ab_repeat') ?? false,
+      showGesturesHints: _readBool('show_gestures_hints') ?? true,
+      autoRotate: _readBool('auto_rotate') ?? true,
+      gestureOneHandMode: _readBool('gesture_one_hand') ?? false,
+      enableGestureSeek: _readBool('gesture_seek') ?? true,
+      enableGestureBrightness: _readBool('gesture_brightness') ?? true,
+      enableGestureVolume: _readBool('gesture_volume') ?? true,
+      keepScreenOn: _readBool('keep_screen_on') ?? true,
+      resumePlayback: _readBool('resume_playback') ?? true,
+      subtitleFontSize: _readDouble('subtitle_font_size') ?? 16.0,
+      subtitleTextColor: _readInt('subtitle_text_color') ?? 0xFFFFFFFF,
       subtitleBackgroundOpacity:
-          _prefs.getDouble('subtitle_background_opacity') ?? 0.3,
-      defaultSubtitleLanguage:
-          _prefs.getString('default_subtitle_language') ?? 'en',
-      defaultAudioLanguage: _prefs.getString('default_audio_language') ?? 'en',
-      enableHardwareAcceleration:
-          _prefs.getBool('hardware_acceleration') ?? true,
+          _readDouble('subtitle_background_opacity') ?? 0.3,
+      defaultSubtitleLanguage: _readString('default_subtitle_language') ?? 'en',
+      defaultAudioLanguage: _readString('default_audio_language') ?? 'en',
+      enableHardwareAcceleration: _readBool('hardware_acceleration') ?? true,
     );
   }
 
@@ -554,5 +551,46 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
         await _prefs.setBool(key, value);
         break;
     }
+  }
+
+  String? _readString(String key) {
+    final value = _prefs.get(key);
+    if (value == null) return null;
+    if (value is String) return value;
+    if (value is num || value is bool) return value.toString();
+    return value.toString();
+  }
+
+  bool? _readBool(String key) {
+    final value = _prefs.get(key);
+    if (value == null) return null;
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    if (value is String) {
+      final normalized = value.toLowerCase();
+      if (normalized == 'true' || normalized == '1') return true;
+      if (normalized == 'false' || normalized == '0') return false;
+    }
+    return null;
+  }
+
+  double? _readDouble(String key) {
+    final value = _prefs.get(key);
+    if (value == null) return null;
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+    if (value is String) return double.tryParse(value);
+    if (value is bool) return value ? 1.0 : 0.0;
+    return null;
+  }
+
+  int? _readInt(String key) {
+    final value = _prefs.get(key);
+    if (value == null) return null;
+    if (value is int) return value;
+    if (value is double) return value.toInt();
+    if (value is String) return int.tryParse(value);
+    if (value is bool) return value ? 1 : 0;
+    return null;
   }
 }

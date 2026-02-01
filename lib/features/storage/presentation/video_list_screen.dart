@@ -5,7 +5,7 @@ import 'package:path/path.dart' as p;
 
 import '../../../core/providers/app_providers.dart';
 import '../../../core/utils/app_utils.dart';
-import '../../player/presentation/video_player_widget.dart';
+import '../../player/presentation/robust_video_player_widget.dart';
 
 class VideoListScreen extends ConsumerStatefulWidget {
   final String folderPath;
@@ -84,7 +84,9 @@ class _VideoListScreenState extends ConsumerState<VideoListScreen> {
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: Colors.blue),
+                    borderSide: BorderSide(
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
                   ),
                 ),
                 onChanged: _filterVideos,
@@ -186,12 +188,14 @@ class _VideoListScreenState extends ConsumerState<VideoListScreen> {
           width: 48,
           height: 48,
           decoration: BoxDecoration(
-            color: Colors.blue[50],
+            color: Theme.of(
+              context,
+            ).colorScheme.primaryContainer.withOpacity(0.3),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Icon(
             Icons.play_circle_fill,
-            color: Colors.blue[700],
+            color: Theme.of(context).colorScheme.primary,
             size: 28,
           ),
         ),
@@ -255,14 +259,16 @@ class _VideoListScreenState extends ConsumerState<VideoListScreen> {
               child: Container(
                 width: double.infinity,
                 decoration: BoxDecoration(
-                  color: Colors.blue[50],
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.primaryContainer.withOpacity(0.3),
                   borderRadius: const BorderRadius.vertical(
                     top: Radius.circular(12),
                   ),
                 ),
                 child: Icon(
                   Icons.play_circle_fill,
-                  color: Colors.blue[700],
+                  color: Theme.of(context).colorScheme.primary,
                   size: 48,
                 ),
               ),
@@ -349,7 +355,7 @@ class _VideoListScreenState extends ConsumerState<VideoListScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => VideoPlayerWidget(videoPath: video.path),
+        builder: (context) => RobustVideoPlayerWidget(videoPath: video.path),
       ),
     );
   }
