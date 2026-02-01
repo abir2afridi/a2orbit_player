@@ -299,6 +299,7 @@ extension BackgroundPlayOptionX on BackgroundPlayOption {
 }
 
 class AppSettings {
+  final String themeMode;
   final BackgroundPlayOption backgroundPlayOption;
   final bool enableScreenOffPlayback;
   final bool autoEnterPip;
@@ -324,6 +325,7 @@ class AppSettings {
   final bool enableHardwareAcceleration;
 
   const AppSettings({
+    this.themeMode = 'system',
     this.backgroundPlayOption = BackgroundPlayOption.backgroundAudio,
     this.enableScreenOffPlayback = true,
     this.autoEnterPip = true,
@@ -350,6 +352,7 @@ class AppSettings {
   });
 
   AppSettings copyWith({
+    String? themeMode,
     BackgroundPlayOption? backgroundPlayOption,
     bool? enableScreenOffPlayback,
     bool? autoEnterPip,
@@ -375,6 +378,7 @@ class AppSettings {
     bool? enableHardwareAcceleration,
   }) {
     return AppSettings(
+      themeMode: themeMode ?? this.themeMode,
       backgroundPlayOption: backgroundPlayOption ?? this.backgroundPlayOption,
       enableScreenOffPlayback:
           enableScreenOffPlayback ?? this.enableScreenOffPlayback,
@@ -419,6 +423,7 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     _prefs = ref.read(sharedPreferencesProvider);
 
     state = AppSettings(
+      themeMode: _prefs.getString('theme_mode') ?? 'system',
       backgroundPlayOption: BackgroundPlayOptionX.fromKey(
         _prefs.getString('background_play_option') ?? 'background_audio',
       ),
@@ -452,6 +457,10 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
 
   Future<void> updateSetting(String key, dynamic value) async {
     switch (key) {
+      case 'theme_mode':
+        state = state.copyWith(themeMode: value);
+        await _prefs.setString(key, value);
+        break;
       case 'background_play_option':
         state = state.copyWith(backgroundPlayOption: value);
         await _prefs.setString(key, value.key);

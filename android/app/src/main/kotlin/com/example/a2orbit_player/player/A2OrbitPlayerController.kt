@@ -279,6 +279,20 @@ class A2OrbitPlayerController(
         player.release()
     }
 
+    // Player.Listener implementation
+    override fun onEvents(player: Player, events: Player.Events) {
+        if (events.containsAny(Player.EVENT_PLAYBACK_STATE_CHANGED, Player.EVENT_PLAY_WHEN_READY_CHANGED)) {
+            handlePlaybackState(player.isPlaying)
+        }
+        if (events.contains(Player.EVENT_TRACKS_CHANGED)) {
+            mainScope.launch { _events.emit(PlayerEvent.TracksChanged(player.currentTracks)) }
+        }
+        if (events.contains(Player.EVENT_PLAYER_ERROR)) {
+            val error = player.playerError
+            mainScope.launch { _events.emit(PlayerEvent.Error(error?.errorCodeName ?: "unknown", error?.message ?: "")) }
+        }
+    }
+
     private fun handlePlaybackState(isPlaying: Boolean) {
         if (!isPlaying && autoPiPEnabled) {
             enterPiP()

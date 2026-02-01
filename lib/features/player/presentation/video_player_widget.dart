@@ -318,6 +318,8 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
     });
     if (_showControls) {
       _restartHideControlsTimer();
+    } else {
+      _hideControlsTimer?.cancel();
     }
   }
 

@@ -52,57 +52,78 @@ class _ThemeScreenState extends ConsumerState<ThemeScreen> {
     ref.read(themeProvider.notifier).setAccentColor(color);
   }
 
+  void _toggleAmoled(bool value) {
+    ref.read(themeProvider.notifier).setUseAmoled(value);
+  }
+
   @override
   Widget build(BuildContext context) {
     final appTheme = ref.watch(themeProvider);
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: colorScheme.background,
       appBar: AppBar(
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black87),
+          icon: Icon(Icons.arrow_back, color: colorScheme.onSurface),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text(
+        title: Text(
           'App Theme',
-          style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold),
+          style: TextStyle(
+            color: colorScheme.onSurface,
+            fontWeight: FontWeight.bold,
+          ),
         ),
-        backgroundColor: Colors.white,
-        elevation: 0.5,
+        backgroundColor: colorScheme.surface,
+        elevation: 0,
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Theme Preview Section
+            _buildThemePreview(colorScheme),
+            const SizedBox(height: 32),
+
             // Top Theme Modes
-            _buildThemeModes(appTheme),
+            _buildThemeModes(appTheme, colorScheme),
             const SizedBox(height: 24),
 
+            // AMOLED Toggle for Dark Mode
+            if (appTheme.themeMode == ThemeMode.dark ||
+                (appTheme.themeMode == ThemeMode.system &&
+                    theme.brightness == Brightness.dark))
+              _buildAmoledToggle(appTheme, colorScheme),
+
+            const SizedBox(height: 32),
+
             // Classic Themes
-            const Text(
+            Text(
               'Classic Themes',
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
-                color: Colors.black87,
+                color: colorScheme.onSurface,
               ),
             ),
             const SizedBox(height: 16),
-            _buildClassicGrid(appTheme),
+            _buildClassicGrid(appTheme, colorScheme),
             const SizedBox(height: 32),
 
-            // Other Themes
-            const Text(
+            // Other Themes (Thematic)
+            Text(
               'Other Themes',
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
-                color: Colors.black87,
+                color: colorScheme.onSurface,
               ),
             ),
             const SizedBox(height: 16),
-            _buildOtherThemesGrid(),
+            _buildOtherThemesGrid(colorScheme),
             const SizedBox(height: 40),
           ],
         ),
@@ -110,9 +131,55 @@ class _ThemeScreenState extends ConsumerState<ThemeScreen> {
     );
   }
 
-  Widget _buildThemeModes(AppThemeData appTheme) {
+  Widget _buildAmoledToggle(AppThemeData appTheme, ColorScheme colorScheme) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceVariant.withOpacity(0.3),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colorScheme.outline.withOpacity(0.2)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.dark_mode_outlined, color: colorScheme.primary),
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Pure Black (AMOLED)',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: colorScheme.onSurface,
+                    ),
+                  ),
+                  Text(
+                    'Save battery on OLED screens',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          Switch(
+            value: appTheme.useAmoled,
+            onChanged: _toggleAmoled,
+            activeColor: colorScheme.primary,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildThemeModes(AppThemeData appTheme, ColorScheme colorScheme) {
     return SizedBox(
-      height: 100,
+      height: 120,
       child: ListView(
         scrollDirection: Axis.horizontal,
         children: [
@@ -122,22 +189,24 @@ class _ThemeScreenState extends ConsumerState<ThemeScreen> {
             icon: Icons.brightness_auto,
             isSelected: appTheme.themeMode == ThemeMode.system,
             onTap: () => _updateThemeMode(ThemeMode.system),
+            colorScheme: colorScheme,
           ),
           _buildThemeModeItem(
             'Light Theme',
             const Color(0xFFE3F2FD),
-            isUsing: appTheme.themeMode == ThemeMode.light,
             isSelected: appTheme.themeMode == ThemeMode.light,
             icon: Icons.wb_sunny,
             onTap: () => _updateThemeMode(ThemeMode.light),
+            colorScheme: colorScheme,
           ),
           _buildThemeModeItem(
             'Dark Theme',
-            const Color(0xFF303F9F),
+            const Color(0xFF1A237E),
             textColor: Colors.white,
-            icon: Icons.nightlight_round,
             isSelected: appTheme.themeMode == ThemeMode.dark,
+            icon: Icons.nightlight_round,
             onTap: () => _updateThemeMode(ThemeMode.dark),
+            colorScheme: colorScheme,
           ),
         ],
       ),
@@ -147,33 +216,35 @@ class _ThemeScreenState extends ConsumerState<ThemeScreen> {
   Widget _buildThemeModeItem(
     String title,
     Color color, {
-    bool isUsing = false,
     bool isSelected = false,
     Color textColor = Colors.black87,
     IconData? icon,
     VoidCallback? onTap,
+    required ColorScheme colorScheme,
   }) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
-        width: 130,
-        margin: const EdgeInsets.only(right: 12),
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(12),
-          border: isSelected ? Border.all(color: Colors.blue, width: 2) : null,
-          boxShadow: [
-            if (isSelected)
-              BoxShadow(
-                color: color.withOpacity(0.4),
-                blurRadius: 8,
-                offset: const Offset(0, 4),
-              ),
-          ],
-        ),
-        child: Stack(
-          children: [
-            Padding(
+      child: Stack(
+        children: [
+          Container(
+            width: 130,
+            margin: const EdgeInsets.only(right: 12, top: 8),
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(16),
+              border: isSelected
+                  ? Border.all(color: colorScheme.primary, width: 2.5)
+                  : null,
+              boxShadow: [
+                if (isSelected)
+                  BoxShadow(
+                    color: colorScheme.primary.withOpacity(0.3),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+              ],
+            ),
+            child: Padding(
               padding: const EdgeInsets.all(12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -182,8 +253,8 @@ class _ThemeScreenState extends ConsumerState<ThemeScreen> {
                     title,
                     style: TextStyle(
                       color: textColor,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
                     ),
                   ),
                   const Spacer(),
@@ -192,43 +263,34 @@ class _ThemeScreenState extends ConsumerState<ThemeScreen> {
                       alignment: Alignment.bottomRight,
                       child: Icon(
                         icon,
-                        color: textColor.withOpacity(0.3),
-                        size: 40,
+                        color: textColor.withOpacity(0.2),
+                        size: 44,
                       ),
                     ),
                 ],
               ),
             ),
-            if (isUsing)
-              Positioned(
-                top: 4,
-                right: 4,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.green,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: const Text(
-                    'Using',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 9,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
+          ),
+          if (isSelected)
+            Positioned(
+              top: 0,
+              right: 4,
+              child: Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: colorScheme.primary,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: colorScheme.surface, width: 2),
                 ),
+                child: const Icon(Icons.check, size: 12, color: Colors.white),
               ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
 
-  Widget _buildClassicGrid(AppThemeData appTheme) {
+  Widget _buildClassicGrid(AppThemeData appTheme, ColorScheme colorScheme) {
     return Column(
       children: [
         GridView.builder(
@@ -236,49 +298,80 @@ class _ThemeScreenState extends ConsumerState<ThemeScreen> {
           physics: const NeverScrollableScrollPhysics(),
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 6,
-            mainAxisSpacing: 10,
-            crossAxisSpacing: 10,
+            mainAxisSpacing: 12,
+            crossAxisSpacing: 12,
           ),
           itemCount: _classicColors.length,
           itemBuilder: (context, index) {
             final color = _classicColors[index];
             final isSelected = appTheme.accentColor.value == color.value;
-            return InkWell(
+            return GestureDetector(
               onTap: () => _updateAccentColor(color),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: color,
-                  borderRadius: BorderRadius.circular(8),
-                  border: isSelected
-                      ? Border.all(color: Colors.black, width: 2)
-                      : null,
-                ),
+              child: Stack(
+                children: [
+                  Container(
+                    decoration: BoxDecoration(
+                      color: color,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        if (isSelected)
+                          BoxShadow(
+                            color: color.withOpacity(0.5),
+                            blurRadius: 8,
+                            spreadRadius: 2,
+                          ),
+                      ],
+                    ),
+                  ),
+                  if (isSelected)
+                    const Center(
+                      child: Icon(Icons.check, color: Colors.white, size: 18),
+                    ),
+                ],
               ),
             );
           },
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 16),
         GridView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 6,
-            mainAxisSpacing: 10,
-            crossAxisSpacing: 10,
+            mainAxisSpacing: 12,
+            crossAxisSpacing: 12,
           ),
           itemCount: _splitColors.length,
           itemBuilder: (context, index) {
             final colors = _splitColors[index];
-            return InkWell(
+            final isSelected = appTheme.accentColor.value == colors[0].value;
+            return GestureDetector(
               onTap: () => _updateAccentColor(colors[0]),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Column(
-                  children: [
-                    Expanded(child: Container(color: colors[0])),
-                    Expanded(child: Container(color: colors[1])),
-                  ],
-                ),
+              child: Stack(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: Column(
+                      children: [
+                        Expanded(child: Container(color: colors[0])),
+                        Expanded(child: Container(color: colors[1])),
+                      ],
+                    ),
+                  ),
+                  if (isSelected)
+                    Container(
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                          color: colorScheme.primary,
+                          width: 2,
+                        ),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Center(
+                        child: Icon(Icons.check, color: Colors.white, size: 18),
+                      ),
+                    ),
+                ],
               ),
             );
           },
@@ -287,64 +380,87 @@ class _ThemeScreenState extends ConsumerState<ThemeScreen> {
     );
   }
 
-  Widget _buildOtherThemesGrid() {
+  Widget _buildOtherThemesGrid(ColorScheme colorScheme) {
     return GridView.count(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       crossAxisCount: 2,
       mainAxisSpacing: 16,
       crossAxisSpacing: 16,
-      childAspectRatio: 0.8,
+      childAspectRatio: 0.85,
       children: [
-        _buildThematicItem('Zodiac Aries', 'Light Theme', 'zodiac_aries_theme'),
-        _buildThematicItem('Zodiac Aries', 'Dark Theme', 'zodiac_aries_theme'),
+        _buildThematicItem(
+          'Zodiac Aries',
+          'Light Theme',
+          'zodiac_aries_theme',
+          colorScheme,
+        ),
+        _buildThematicItem(
+          'Zodiac Aries',
+          'Dark Theme',
+          'zodiac_aries_theme',
+          colorScheme,
+        ),
         _buildThematicItem(
           'Zodiac Pisces',
           'Light Theme',
           'zodiac_pisces_theme',
+          colorScheme,
         ),
         _buildThematicItem(
           'Zodiac Pisces',
           'Dark Theme',
           'zodiac_pisces_theme',
+          colorScheme,
         ),
       ],
     );
   }
 
-  Widget _buildThematicItem(String name, String mode, String imageName) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          child: Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              color: Colors.grey[200],
-              image: const DecorationImage(
-                image: NetworkImage('https://via.placeholder.com/300x400'),
-                fit: BoxFit.cover,
-              ),
-            ),
+  Widget _buildThematicItem(
+    String name,
+    String mode,
+    String imageName,
+    ColorScheme colorScheme,
+  ) {
+    return Card(
+      elevation: 4,
+      shadowColor: Colors.black12,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
             child: Container(
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Colors.black.withOpacity(0.3), Colors.transparent],
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(20),
+                ),
+                color: colorScheme.surfaceVariant,
+                image: const DecorationImage(
+                  image: NetworkImage('https://via.placeholder.com/300x400'),
+                  fit: BoxFit.cover,
                 ),
               ),
-              child: Align(
-                alignment: Alignment.topCenter,
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(20),
+                  ),
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Colors.black.withOpacity(0.4), Colors.transparent],
+                  ),
+                ),
                 child: Padding(
-                  padding: const EdgeInsets.all(8.0),
+                  padding: const EdgeInsets.all(12),
                   child: Text(
                     name,
                     style: const TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
-                      fontSize: 12,
+                      fontSize: 14,
                       shadows: [Shadow(blurRadius: 4, color: Colors.black54)],
                     ),
                   ),
@@ -352,15 +468,139 @@ class _ThemeScreenState extends ConsumerState<ThemeScreen> {
               ),
             ),
           ),
-        ),
-        const SizedBox(height: 8),
-        Center(
-          child: Text(
-            mode,
-            style: TextStyle(color: Colors.grey[600], fontSize: 11),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Center(
+              child: Text(
+                mode,
+                style: TextStyle(
+                  color: colorScheme.onSurfaceVariant,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildThemePreview(ColorScheme colorScheme) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: colorScheme.outline.withOpacity(0.1)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: colorScheme.primary,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.play_arrow,
+                  color: Colors.white,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      height: 12,
+                      width: 120,
+                      decoration: BoxDecoration(
+                        color: colorScheme.onSurface,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Container(
+                      height: 8,
+                      width: 80,
+                      decoration: BoxDecoration(
+                        color: colorScheme.onSurface.withOpacity(0.4),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Switch(
+                value: true,
+                onChanged: (_) {},
+                activeColor: colorScheme.primary,
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              _buildMiniChip(colorScheme, 'Video', true),
+              const SizedBox(width: 8),
+              _buildMiniChip(colorScheme, 'Music', false),
+              const SizedBox(width: 8),
+              _buildMiniChip(colorScheme, 'Folders', false),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Container(
+            height: 4,
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: colorScheme.primary.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(2),
+            ),
+            child: FractionallySizedBox(
+              alignment: Alignment.centerLeft,
+              widthFactor: 0.6,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: colorScheme.primary,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMiniChip(ColorScheme colorScheme, String label, bool selected) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: selected ? colorScheme.primary : colorScheme.surfaceVariant,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: selected ? Colors.white : colorScheme.onSurfaceVariant,
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
         ),
-      ],
+      ),
     );
   }
 }

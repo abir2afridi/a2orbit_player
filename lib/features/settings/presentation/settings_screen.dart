@@ -215,6 +215,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
           const SizedBox(height: 24),
 
+          _buildSection('App Theme', [
+            _buildDropdownTile(
+              title: 'Theme',
+              value: _settings.themeMode,
+              items: const [
+                DropdownMenuItem(value: 'system', child: Text('System')),
+                DropdownMenuItem(value: 'light', child: Text('Light')),
+                DropdownMenuItem(value: 'dark', child: Text('Dark')),
+                DropdownMenuItem(value: 'amoled', child: Text('AMOLED Black')),
+              ],
+              onChanged: (value) =>
+                  _updateSetting('theme_mode', value ?? 'system'),
+            ),
+          ]),
+
+          const SizedBox(height: 24),
+
           _buildSection('System', [
             _buildSwitchTile(
               title: 'Keep Screen On',
