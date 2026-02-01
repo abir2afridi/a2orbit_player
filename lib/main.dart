@@ -1,16 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'core/providers/app_providers.dart';
 import 'core/theme/app_theme.dart';
+import 'features/privacy/presentation/app_lock_gate.dart';
 import 'features/ui/screens/home_screen.dart';
 import 'features/ui/screens/player_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  final sharedPreferences = await SharedPreferences.getInstance();
 
-  // Initialize SharedPreferences
-  // final sharedPreferences = await SharedPreferences.getInstance();
-
-  runApp(const ProviderScope(child: A2OrbitPlayer()));
+  runApp(
+    ProviderScope(
+      overrides: [
+        sharedPreferencesProvider.overrideWithValue(sharedPreferences),
+      ],
+      child: const A2OrbitPlayer(),
+    ),
+  );
 }
 
 class A2OrbitPlayer extends ConsumerWidget {
@@ -18,14 +27,16 @@ class A2OrbitPlayer extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // final themeData = ref.watch(themeProvider);
+    final themeData = ref.watch(themeProvider);
 
     return MaterialApp(
       title: 'A2Orbit Player',
-      theme: AppTheme.lightTheme,
-      darkTheme: AppTheme.darkTheme,
-      themeMode: ThemeMode.system, // Will be updated with provider later
-      home: const HomeScreen(),
+      theme: AppTheme.light(themeData),
+      darkTheme: themeData.useAmoled
+          ? AppTheme.amoled(themeData)
+          : AppTheme.dark(themeData),
+      themeMode: themeData.themeMode,
+      home: const AppLockGate(child: HomeScreen()),
       routes: {
         '/player': (context) {
           final args = ModalRoute.of(context)?.settings.arguments;

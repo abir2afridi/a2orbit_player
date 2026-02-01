@@ -16,9 +16,11 @@ dependencies:
   
   # Video Player
   video_player: ^2.8.2
+  better_player: ^0.0.84
   
   # Audio & Background
   just_audio: ^0.9.36
+  audio_session: ^0.1.16
   
   # File Management
   permission_handler: ^11.1.0
@@ -39,9 +41,12 @@ dependencies:
   # System
   wakelock_plus: ^1.1.4
   device_info_plus: ^9.1.1
+  screen_brightness: ^2.1.7
+  volume_controller: ^2.0.6
   
   # Utilities
   uuid: ^4.2.1
+  crypto: ^3.0.3
 
 dev_dependencies:
   flutter_test:

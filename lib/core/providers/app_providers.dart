@@ -1,11 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:local_auth/local_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../features/privacy/services/privacy_service.dart';
 import '../constants/app_constants.dart';
 
 // SharedPreferences Provider
 final sharedPreferencesProvider = Provider<SharedPreferences>((ref) {
   throw UnimplementedError('SharedPreferences must be initialized in main()');
+});
+
+// Privacy Service Provider
+final privacyServiceProvider = Provider<PrivacyService>((ref) {
+  final prefs = ref.watch(sharedPreferencesProvider);
+  return PrivacyService(prefs);
 });
 
 // Theme Provider
@@ -17,22 +26,26 @@ class AppThemeData {
   final ThemeMode themeMode;
   final Color accentColor;
   final bool useDynamicColor;
+  final bool useAmoled;
 
   const AppThemeData({
     this.themeMode = ThemeMode.system,
     this.accentColor = const Color(0xFF1976D2),
     this.useDynamicColor = true,
+    this.useAmoled = false,
   });
 
   AppThemeData copyWith({
     ThemeMode? themeMode,
     Color? accentColor,
     bool? useDynamicColor,
+    bool? useAmoled,
   }) {
     return AppThemeData(
       themeMode: themeMode ?? this.themeMode,
       accentColor: accentColor ?? this.accentColor,
       useDynamicColor: useDynamicColor ?? this.useDynamicColor,
+      useAmoled: useAmoled ?? this.useAmoled,
     );
   }
 }
@@ -51,11 +64,13 @@ class ThemeNotifier extends StateNotifier<AppThemeData> {
     final themeIndex = _prefs.getInt('theme_mode') ?? 0;
     final accentColorValue = _prefs.getInt('accent_color') ?? 0xFF1976D2;
     final useDynamicColor = _prefs.getBool('use_dynamic_color') ?? true;
+    final useAmoled = _prefs.getBool('use_amoled_theme') ?? false;
 
     state = AppThemeData(
       themeMode: ThemeMode.values[themeIndex],
       accentColor: Color(accentColorValue),
       useDynamicColor: useDynamicColor,
+      useAmoled: useAmoled,
     );
   }
 
@@ -73,6 +88,180 @@ class ThemeNotifier extends StateNotifier<AppThemeData> {
     state = state.copyWith(useDynamicColor: useDynamicColor);
     await _prefs.setBool('use_dynamic_color', useDynamicColor);
   }
+
+  Future<void> setUseAmoled(bool useAmoled) async {
+    state = state.copyWith(useAmoled: useAmoled);
+    await _prefs.setBool('use_amoled_theme', useAmoled);
+  }
+}
+
+// App Lock Provider
+final appLockProvider = StateNotifierProvider<AppLockNotifier, AppLockState>((
+  ref,
+) {
+  return AppLockNotifier(ref);
+});
+
+class AppLockState {
+  final bool isEnabled;
+  final bool hasPin;
+  final bool biometricEnabled;
+  final bool biometricAvailable;
+  final bool isUnlocked;
+  final bool isLoading;
+  final String? errorMessage;
+
+  const AppLockState({
+    this.isEnabled = false,
+    this.hasPin = false,
+    this.biometricEnabled = false,
+    this.biometricAvailable = false,
+    this.isUnlocked = true,
+    this.isLoading = true,
+    this.errorMessage,
+  });
+
+  AppLockState copyWith({
+    bool? isEnabled,
+    bool? hasPin,
+    bool? biometricEnabled,
+    bool? biometricAvailable,
+    bool? isUnlocked,
+    bool? isLoading,
+    String? errorMessage,
+  }) {
+    return AppLockState(
+      isEnabled: isEnabled ?? this.isEnabled,
+      hasPin: hasPin ?? this.hasPin,
+      biometricEnabled: biometricEnabled ?? this.biometricEnabled,
+      biometricAvailable: biometricAvailable ?? this.biometricAvailable,
+      isUnlocked: isUnlocked ?? this.isUnlocked,
+      isLoading: isLoading ?? this.isLoading,
+      errorMessage: errorMessage,
+    );
+  }
+}
+
+class AppLockNotifier extends StateNotifier<AppLockState> {
+  final Ref ref;
+  final LocalAuthentication _auth = LocalAuthentication();
+
+  AppLockNotifier(this.ref) : super(const AppLockState()) {
+    _initialize();
+  }
+
+  Future<void> _initialize() async {
+    final privacyService = ref.read(privacyServiceProvider);
+    final canCheckBiometrics = await _auth.canCheckBiometrics;
+    final isDeviceSupported = await _auth.isDeviceSupported();
+    final usableBiometrics = canCheckBiometrics || isDeviceSupported;
+
+    final isEnabled = privacyService.isAppLockEnabled;
+    final hasPin = privacyService.hasPinSet;
+    final biometricEnabled =
+        isEnabled && hasPin && privacyService.isBiometricUnlockEnabled;
+
+    state = state.copyWith(
+      isEnabled: isEnabled && hasPin,
+      hasPin: hasPin,
+      biometricEnabled: biometricEnabled && usableBiometrics,
+      biometricAvailable: usableBiometrics,
+      isUnlocked: !(isEnabled && hasPin),
+      isLoading: false,
+      errorMessage: null,
+    );
+  }
+
+  Future<void> refresh() async {
+    state = state.copyWith(isLoading: true, errorMessage: null);
+    await _initialize();
+  }
+
+  Future<void> setEnabled(bool enable) async {
+    final privacyService = ref.read(privacyServiceProvider);
+    if (enable && !privacyService.hasPinSet) {
+      state = state.copyWith(
+        errorMessage: 'Set a PIN before enabling App Lock.',
+        isEnabled: false,
+        isUnlocked: true,
+      );
+      return;
+    }
+
+    await privacyService.setAppLockEnabled(enable);
+    state = state.copyWith(
+      isEnabled: enable,
+      isUnlocked: !enable,
+      errorMessage: null,
+    );
+  }
+
+  Future<void> setPin(String pin) async {
+    final privacyService = ref.read(privacyServiceProvider);
+    await privacyService.setPin(pin);
+    await privacyService.setAppLockEnabled(true);
+    state = state.copyWith(
+      hasPin: true,
+      isEnabled: true,
+      isUnlocked: false,
+      errorMessage: null,
+    );
+  }
+
+  Future<void> clearPin() async {
+    final privacyService = ref.read(privacyServiceProvider);
+    await privacyService.clearPin();
+    await privacyService.setAppLockEnabled(false);
+    state = state.copyWith(
+      hasPin: false,
+      isEnabled: false,
+      isUnlocked: true,
+      biometricEnabled: false,
+      errorMessage: null,
+    );
+  }
+
+  Future<void> setBiometricEnabled(bool enable) async {
+    if (!state.biometricAvailable) return;
+    final privacyService = ref.read(privacyServiceProvider);
+    await privacyService.setBiometricUnlockEnabled(enable);
+    state = state.copyWith(biometricEnabled: enable, errorMessage: null);
+  }
+
+  Future<bool> unlockWithPin(String pin) async {
+    final privacyService = ref.read(privacyServiceProvider);
+    final success = privacyService.verifyPin(pin);
+    if (success) {
+      state = state.copyWith(isUnlocked: true, errorMessage: null);
+    } else {
+      state = state.copyWith(errorMessage: 'Incorrect PIN. Try again.');
+    }
+    return success;
+  }
+
+  Future<bool> unlockWithBiometric() async {
+    if (!state.biometricEnabled || !state.biometricAvailable) {
+      return false;
+    }
+    try {
+      final authenticated = await _auth.authenticate(
+        localizedReason: 'Unlock A2Orbit Player',
+        options: const AuthenticationOptions(
+          biometricOnly: true,
+          stickyAuth: true,
+        ),
+      );
+      if (authenticated) {
+        state = state.copyWith(isUnlocked: true, errorMessage: null);
+      }
+      return authenticated;
+    } catch (e) {
+      state = state.copyWith(
+        errorMessage: 'Biometric authentication failed. ${e.toString()}',
+      );
+      return false;
+    }
+  }
 }
 
 // Settings Provider
@@ -82,59 +271,133 @@ final settingsProvider = StateNotifierProvider<SettingsNotifier, AppSettings>((
   return SettingsNotifier(ref);
 });
 
+enum BackgroundPlayOption { stop, backgroundAudio, pictureInPicture }
+
+extension BackgroundPlayOptionX on BackgroundPlayOption {
+  String get key {
+    switch (this) {
+      case BackgroundPlayOption.stop:
+        return 'stop';
+      case BackgroundPlayOption.backgroundAudio:
+        return 'background_audio';
+      case BackgroundPlayOption.pictureInPicture:
+        return 'pip';
+    }
+  }
+
+  static BackgroundPlayOption fromKey(String key) {
+    switch (key) {
+      case 'background_audio':
+        return BackgroundPlayOption.backgroundAudio;
+      case 'pip':
+        return BackgroundPlayOption.pictureInPicture;
+      case 'stop':
+      default:
+        return BackgroundPlayOption.stop;
+    }
+  }
+}
+
 class AppSettings {
-  final bool backgroundPlay;
-  final bool pipMode;
+  final BackgroundPlayOption backgroundPlayOption;
+  final bool enableScreenOffPlayback;
+  final bool autoEnterPip;
   final bool audioOnly;
   final bool volumeBoost;
   final double playbackSpeed;
   final int seekDuration;
+  final int sleepTimerMinutes;
+  final bool enableABRepeat;
   final bool showGesturesHints;
   final bool autoRotate;
+  final bool gestureOneHandMode;
+  final bool enableGestureSeek;
+  final bool enableGestureBrightness;
+  final bool enableGestureVolume;
   final bool keepScreenOn;
+  final bool resumePlayback;
+  final double subtitleFontSize;
+  final int subtitleTextColor;
+  final double subtitleBackgroundOpacity;
   final String defaultSubtitleLanguage;
   final String defaultAudioLanguage;
   final bool enableHardwareAcceleration;
 
   const AppSettings({
-    this.backgroundPlay = true,
-    this.pipMode = true,
+    this.backgroundPlayOption = BackgroundPlayOption.backgroundAudio,
+    this.enableScreenOffPlayback = true,
+    this.autoEnterPip = true,
     this.audioOnly = false,
     this.volumeBoost = false,
     this.playbackSpeed = 1.0,
     this.seekDuration = 10000,
+    this.sleepTimerMinutes = 0,
+    this.enableABRepeat = false,
     this.showGesturesHints = true,
     this.autoRotate = true,
+    this.gestureOneHandMode = false,
+    this.enableGestureSeek = true,
+    this.enableGestureBrightness = true,
+    this.enableGestureVolume = true,
     this.keepScreenOn = true,
+    this.resumePlayback = true,
+    this.subtitleFontSize = 16.0,
+    this.subtitleTextColor = 0xFFFFFFFF,
+    this.subtitleBackgroundOpacity = 0.3,
     this.defaultSubtitleLanguage = 'en',
     this.defaultAudioLanguage = 'en',
     this.enableHardwareAcceleration = true,
   });
 
   AppSettings copyWith({
-    bool? backgroundPlay,
-    bool? pipMode,
+    BackgroundPlayOption? backgroundPlayOption,
+    bool? enableScreenOffPlayback,
+    bool? autoEnterPip,
     bool? audioOnly,
     bool? volumeBoost,
     double? playbackSpeed,
     int? seekDuration,
+    int? sleepTimerMinutes,
+    bool? enableABRepeat,
     bool? showGesturesHints,
     bool? autoRotate,
+    bool? gestureOneHandMode,
+    bool? enableGestureSeek,
+    bool? enableGestureBrightness,
+    bool? enableGestureVolume,
     bool? keepScreenOn,
+    bool? resumePlayback,
+    double? subtitleFontSize,
+    int? subtitleTextColor,
+    double? subtitleBackgroundOpacity,
     String? defaultSubtitleLanguage,
     String? defaultAudioLanguage,
     bool? enableHardwareAcceleration,
   }) {
     return AppSettings(
-      backgroundPlay: backgroundPlay ?? this.backgroundPlay,
-      pipMode: pipMode ?? this.pipMode,
+      backgroundPlayOption: backgroundPlayOption ?? this.backgroundPlayOption,
+      enableScreenOffPlayback:
+          enableScreenOffPlayback ?? this.enableScreenOffPlayback,
+      autoEnterPip: autoEnterPip ?? this.autoEnterPip,
       audioOnly: audioOnly ?? this.audioOnly,
       volumeBoost: volumeBoost ?? this.volumeBoost,
       playbackSpeed: playbackSpeed ?? this.playbackSpeed,
       seekDuration: seekDuration ?? this.seekDuration,
+      sleepTimerMinutes: sleepTimerMinutes ?? this.sleepTimerMinutes,
+      enableABRepeat: enableABRepeat ?? this.enableABRepeat,
       showGesturesHints: showGesturesHints ?? this.showGesturesHints,
       autoRotate: autoRotate ?? this.autoRotate,
+      gestureOneHandMode: gestureOneHandMode ?? this.gestureOneHandMode,
+      enableGestureSeek: enableGestureSeek ?? this.enableGestureSeek,
+      enableGestureBrightness:
+          enableGestureBrightness ?? this.enableGestureBrightness,
+      enableGestureVolume: enableGestureVolume ?? this.enableGestureVolume,
       keepScreenOn: keepScreenOn ?? this.keepScreenOn,
+      resumePlayback: resumePlayback ?? this.resumePlayback,
+      subtitleFontSize: subtitleFontSize ?? this.subtitleFontSize,
+      subtitleTextColor: subtitleTextColor ?? this.subtitleTextColor,
+      subtitleBackgroundOpacity:
+          subtitleBackgroundOpacity ?? this.subtitleBackgroundOpacity,
       defaultSubtitleLanguage:
           defaultSubtitleLanguage ?? this.defaultSubtitleLanguage,
       defaultAudioLanguage: defaultAudioLanguage ?? this.defaultAudioLanguage,
@@ -156,15 +419,29 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     _prefs = ref.read(sharedPreferencesProvider);
 
     state = AppSettings(
-      backgroundPlay: _prefs.getBool('background_play') ?? true,
-      pipMode: _prefs.getBool('pip_mode') ?? true,
+      backgroundPlayOption: BackgroundPlayOptionX.fromKey(
+        _prefs.getString('background_play_option') ?? 'background_audio',
+      ),
+      enableScreenOffPlayback: _prefs.getBool('screen_off_playback') ?? true,
+      autoEnterPip: _prefs.getBool('auto_enter_pip') ?? true,
       audioOnly: _prefs.getBool('audio_only') ?? false,
       volumeBoost: _prefs.getBool('volume_boost') ?? false,
       playbackSpeed: _prefs.getDouble('playback_speed') ?? 1.0,
       seekDuration: _prefs.getInt('seek_duration') ?? 10000,
+      sleepTimerMinutes: _prefs.getInt('sleep_timer_minutes') ?? 0,
+      enableABRepeat: _prefs.getBool('enable_ab_repeat') ?? false,
       showGesturesHints: _prefs.getBool('show_gestures_hints') ?? true,
       autoRotate: _prefs.getBool('auto_rotate') ?? true,
+      gestureOneHandMode: _prefs.getBool('gesture_one_hand') ?? false,
+      enableGestureSeek: _prefs.getBool('gesture_seek') ?? true,
+      enableGestureBrightness: _prefs.getBool('gesture_brightness') ?? true,
+      enableGestureVolume: _prefs.getBool('gesture_volume') ?? true,
       keepScreenOn: _prefs.getBool('keep_screen_on') ?? true,
+      resumePlayback: _prefs.getBool('resume_playback') ?? true,
+      subtitleFontSize: _prefs.getDouble('subtitle_font_size') ?? 16.0,
+      subtitleTextColor: _prefs.getInt('subtitle_text_color') ?? 0xFFFFFFFF,
+      subtitleBackgroundOpacity:
+          _prefs.getDouble('subtitle_background_opacity') ?? 0.3,
       defaultSubtitleLanguage:
           _prefs.getString('default_subtitle_language') ?? 'en',
       defaultAudioLanguage: _prefs.getString('default_audio_language') ?? 'en',
@@ -175,12 +452,16 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
 
   Future<void> updateSetting(String key, dynamic value) async {
     switch (key) {
-      case 'background_play':
-        state = state.copyWith(backgroundPlay: value);
+      case 'background_play_option':
+        state = state.copyWith(backgroundPlayOption: value);
+        await _prefs.setString(key, value.key);
+        break;
+      case 'screen_off_playback':
+        state = state.copyWith(enableScreenOffPlayback: value);
         await _prefs.setBool(key, value);
         break;
-      case 'pip_mode':
-        state = state.copyWith(pipMode: value);
+      case 'auto_enter_pip':
+        state = state.copyWith(autoEnterPip: value);
         await _prefs.setBool(key, value);
         break;
       case 'audio_only':
@@ -199,6 +480,14 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
         state = state.copyWith(seekDuration: value);
         await _prefs.setInt(key, value);
         break;
+      case 'sleep_timer_minutes':
+        state = state.copyWith(sleepTimerMinutes: value);
+        await _prefs.setInt(key, value);
+        break;
+      case 'enable_ab_repeat':
+        state = state.copyWith(enableABRepeat: value);
+        await _prefs.setBool(key, value);
+        break;
       case 'show_gestures_hints':
         state = state.copyWith(showGesturesHints: value);
         await _prefs.setBool(key, value);
@@ -207,9 +496,41 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
         state = state.copyWith(autoRotate: value);
         await _prefs.setBool(key, value);
         break;
+      case 'gesture_one_hand':
+        state = state.copyWith(gestureOneHandMode: value);
+        await _prefs.setBool(key, value);
+        break;
+      case 'gesture_seek':
+        state = state.copyWith(enableGestureSeek: value);
+        await _prefs.setBool(key, value);
+        break;
+      case 'gesture_brightness':
+        state = state.copyWith(enableGestureBrightness: value);
+        await _prefs.setBool(key, value);
+        break;
+      case 'gesture_volume':
+        state = state.copyWith(enableGestureVolume: value);
+        await _prefs.setBool(key, value);
+        break;
       case 'keep_screen_on':
         state = state.copyWith(keepScreenOn: value);
         await _prefs.setBool(key, value);
+        break;
+      case 'resume_playback':
+        state = state.copyWith(resumePlayback: value);
+        await _prefs.setBool(key, value);
+        break;
+      case 'subtitle_font_size':
+        state = state.copyWith(subtitleFontSize: value);
+        await _prefs.setDouble(key, value);
+        break;
+      case 'subtitle_text_color':
+        state = state.copyWith(subtitleTextColor: value);
+        await _prefs.setInt(key, value);
+        break;
+      case 'subtitle_background_opacity':
+        state = state.copyWith(subtitleBackgroundOpacity: value);
+        await _prefs.setDouble(key, value);
         break;
       case 'default_subtitle_language':
         state = state.copyWith(defaultSubtitleLanguage: value);
