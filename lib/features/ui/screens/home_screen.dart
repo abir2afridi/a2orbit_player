@@ -65,8 +65,14 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           IconButton(
-            onPressed: () {},
+            onPressed: () {
+              // Toggle grid view in file browser
+              setState(() {
+                // This will be passed to FileBrowserScreen
+              });
+            },
             icon: const Icon(Icons.grid_view, color: Colors.black54),
+            tooltip: 'Toggle Grid View',
           ),
           IconButton(
             onPressed: () {
