@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../storage/models/file_view_settings.dart';
 import '../../storage/presentation/file_browser_screen.dart';
 import '../../settings/presentation/settings_screen.dart';
 import '../../storage/presentation/widgets/file_view_settings_bottom_sheet.dart';
@@ -127,7 +128,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 IconButton(
                   onPressed: _showFileSettings,
                   icon: Icon(
-                    Icons.grid_view,
+                    ref.watch(fileSettingsProvider).layout == FileLayout.grid
+                        ? Icons.grid_view
+                        : Icons.list,
                     color: Theme.of(
                       context,
                     ).colorScheme.onSurface.withOpacity(0.6),

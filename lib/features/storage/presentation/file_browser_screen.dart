@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +9,7 @@ import '../../../core/utils/permission_helper.dart';
 import '../models/file_view_settings.dart';
 import '../providers/file_settings_provider.dart';
 import 'video_list_screen.dart';
+import '../../player/presentation/robust_video_player_widget.dart';
 
 class FileBrowserScreen extends ConsumerStatefulWidget {
   final bool isEmbedded;
@@ -24,7 +26,9 @@ class FileBrowserScreen extends ConsumerStatefulWidget {
 
 class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
   Map<String, List<File>> _foldersWithVideos = {};
+  List<File> _allFiles = [];
   List<String> _filteredFolderPaths = [];
+  List<File> _filteredFiles = [];
   bool _isLoading = true;
   bool _isRefreshing = false;
   String _searchQuery = '';
@@ -105,9 +109,10 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
       if (mounted) {
         setState(() {
           _foldersWithVideos = foldersWithVideos;
-          _filteredFolderPaths = foldersWithVideos.keys.toList();
+          _allFiles = foldersWithVideos.values.expand((e) => e).toList();
           _isLoading = false;
           _isRefreshing = false;
+          _applySettings();
         });
       }
     } catch (e) {
@@ -123,20 +128,96 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
     }
   }
 
+  void _applySettings() {
+    final settings = ref.read(fileSettingsProvider);
+    final query = _searchQuery.toLowerCase();
+
+    // 1. Filter folders
+    List<String> folderPaths = _foldersWithVideos.keys.where((path) {
+      if (query.isEmpty) return true;
+      return FolderScanService.getFolderName(
+        path,
+      ).toLowerCase().contains(query);
+    }).toList();
+
+    // 2. Filter files
+    List<File> files = _allFiles.where((file) {
+      if (query.isEmpty) return true;
+      return file.path.split('/').last.toLowerCase().contains(query);
+    }).toList();
+
+    // 3. Sort folders
+    folderPaths.sort((a, b) {
+      int cmp;
+      switch (settings.sortOption) {
+        case FileSortOption.date:
+          final aDate = FileSystemEntity.statSync(a).modified;
+          final bDate = FileSystemEntity.statSync(b).modified;
+          cmp = aDate.compareTo(bDate);
+          break;
+        case FileSortOption.size:
+          final aSize =
+              _foldersWithVideos[a]?.fold<int>(
+                0,
+                (p, f) => p + f.lengthSync(),
+              ) ??
+              0;
+          final bSize =
+              _foldersWithVideos[b]?.fold<int>(
+                0,
+                (p, f) => p + f.lengthSync(),
+              ) ??
+              0;
+          cmp = aSize.compareTo(bSize);
+          break;
+        case FileSortOption.path:
+          cmp = a.compareTo(b);
+          break;
+        default: // title
+          cmp = FolderScanService.getFolderName(a).toLowerCase().compareTo(
+            FolderScanService.getFolderName(b).toLowerCase(),
+          );
+      }
+      return settings.isAscending ? cmp : -cmp;
+    });
+
+    // 4. Sort files
+    files.sort((a, b) {
+      int cmp;
+      switch (settings.sortOption) {
+        case FileSortOption.date:
+          cmp = a.lastModifiedSync().compareTo(b.lastModifiedSync());
+          break;
+        case FileSortOption.size:
+          cmp = a.lengthSync().compareTo(b.lengthSync());
+          break;
+        case FileSortOption.path:
+          cmp = a.path.compareTo(b.path);
+          break;
+        case FileSortOption.type:
+          cmp = a.path.split('.').last.compareTo(b.path.split('.').last);
+          break;
+        default: // title
+          cmp = a.path
+              .split('/')
+              .last
+              .toLowerCase()
+              .compareTo(b.path.split('/').last.toLowerCase());
+      }
+      return settings.isAscending ? cmp : -cmp;
+    });
+
+    setState(() {
+      _filteredFolderPaths = folderPaths;
+      _filteredFiles = files;
+    });
+  }
+
   void _filterFolders(String query) {
     if (mounted) {
       setState(() {
         _searchQuery = query;
-        if (query.isEmpty) {
-          _filteredFolderPaths = _foldersWithVideos.keys.toList();
-        } else {
-          _filteredFolderPaths = _foldersWithVideos.keys.where((folderPath) {
-            final folderName = FolderScanService.getFolderName(
-              folderPath,
-            ).toLowerCase();
-            return folderName.contains(query.toLowerCase());
-          }).toList();
-        }
+        _applySettings();
       });
     }
   }
@@ -291,6 +372,18 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
   Widget build(BuildContext context) {
     final settings = ref.watch(fileSettingsProvider);
     final isGridView = settings.layout == FileLayout.grid;
+    final isFilesView = settings.viewMode == FileViewMode.files;
+
+    // Trigger re-sort/filter when settings change
+    ref.listen(fileSettingsProvider, (previous, next) {
+      if (previous != next) {
+        _applySettings();
+      }
+    });
+
+    final currentItemCount = isFilesView
+        ? _filteredFiles.length
+        : _filteredFolderPaths.length;
 
     final content = Column(
       children: [
@@ -299,11 +392,11 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
         Expanded(
           child: _isLoading
               ? const Center(child: CircularProgressIndicator())
-              : _filteredFolderPaths.isEmpty
+              : currentItemCount == 0
               ? _buildEmptyState()
               : isGridView
-              ? _buildFolderGrid()
-              : _buildFolderList(),
+              ? (isFilesView ? _buildFileGrid() : _buildFolderGrid())
+              : (isFilesView ? _buildFileList() : _buildFolderList()),
         ),
       ],
     );
@@ -600,11 +693,156 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
     );
   }
 
+  Widget _buildFileList() {
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      itemCount: _filteredFiles.length,
+      itemBuilder: (context, index) {
+        final video = _filteredFiles[index];
+        return _buildFileListItem(video);
+      },
+    );
+  }
+
+  Widget _buildFileGrid() {
+    return GridView.builder(
+      padding: const EdgeInsets.all(16),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        childAspectRatio: 0.8,
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 12,
+      ),
+      itemCount: _filteredFiles.length,
+      itemBuilder: (context, index) {
+        final video = _filteredFiles[index];
+        return _buildFileGridItem(video);
+      },
+    );
+  }
+
+  Widget _buildFileListItem(File video) {
+    final fileName = video.path.split('/').last;
+    final fileSize = _formatFileSize(video.lengthSync());
+
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: ListTile(
+        contentPadding: const EdgeInsets.all(12),
+        leading: Container(
+          width: 48,
+          height: 48,
+          decoration: BoxDecoration(
+            color: Theme.of(
+              context,
+            ).colorScheme.primaryContainer.withOpacity(0.3),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(
+            Icons.play_circle_fill,
+            color: Theme.of(context).colorScheme.primary,
+            size: 28,
+          ),
+        ),
+        title: Text(
+          fileName,
+          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+        subtitle: Text(
+          fileSize,
+          style: TextStyle(color: Colors.grey[600], fontSize: 12),
+        ),
+        onTap: () => _playVideo(video),
+      ),
+    );
+  }
+
+  Widget _buildFileGridItem(File video) {
+    final fileName = video.path.split('/').last;
+    final fileSize = _formatFileSize(video.lengthSync());
+
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: InkWell(
+        onTap: () => _playVideo(video),
+        borderRadius: BorderRadius.circular(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              flex: 3,
+              child: Container(
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.primaryContainer.withOpacity(0.3),
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(12),
+                  ),
+                ),
+                child: Icon(
+                  Icons.play_circle_fill,
+                  color: Theme.of(context).colorScheme.primary,
+                  size: 48,
+                ),
+              ),
+            ),
+            Expanded(
+              flex: 2,
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      fileName,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 12,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const Spacer(),
+                    Text(
+                      fileSize,
+                      style: TextStyle(color: Colors.grey[600], fontSize: 10),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _formatFileSize(int bytes) {
+    if (bytes <= 0) return "0 B";
+    const suffixes = ["B", "KB", "MB", "GB", "TB"];
+    var i = (log(bytes) / log(1024)).floor();
+    return "${(bytes / pow(1024, i)).toStringAsFixed(1)} ${suffixes[i]}";
+  }
+
+  void _playVideo(File video) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => RobustVideoPlayerWidget(videoPath: video.path),
+      ),
+    );
+  }
+
   String _getShortPath(String fullPath) {
     final parts = fullPath.split('/');
     if (parts.length <= 3) return fullPath;
-
-    // Show last 3 parts: .../parent/folder
     return '.../${parts.sublist(parts.length - 2).join('/')}';
   }
 }
