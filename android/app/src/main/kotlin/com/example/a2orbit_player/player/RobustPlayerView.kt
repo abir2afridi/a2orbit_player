@@ -8,6 +8,7 @@ import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.ScaleGestureDetector.SimpleOnScaleGestureListener
 import android.view.View
+import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.ImageView
 import androidx.media3.ui.PlayerView
@@ -22,7 +23,15 @@ class RobustPlayerView @JvmOverloads constructor(
     defStyleAttr: Int = 0
 ) : FrameLayout(context, attrs, defStyleAttr) {
 
-    val playerView: PlayerView = PlayerView(context)
+    val playerView: PlayerView = PlayerView(context).apply {
+        useController = false
+        isClickable = false
+        isLongClickable = false
+        isFocusable = false
+        isFocusableInTouchMode = false
+        descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+        setOnTouchListener { _, _ -> false }
+    }
     
     private var gestureListener: GestureListener? = null
     private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
