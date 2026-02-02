@@ -1,22 +1,51 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../storage/presentation/file_browser_screen.dart';
 import '../../settings/presentation/settings_screen.dart';
+import '../../storage/presentation/widgets/file_view_settings_bottom_sheet.dart';
+import '../../storage/providers/file_settings_provider.dart';
 import 'me_screen.dart';
 import 'music_screen.dart';
 
-class HomeScreen extends StatefulWidget {
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends ConsumerState<HomeScreen> {
   int _currentIndex = 0; // Default to Local/Folders
   bool _isSearching = false;
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
+
+  void _showFileSettings() async {
+    final settings = ref.read(fileSettingsProvider);
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => FileViewSettingsBottomSheet(
+        initialViewMode: settings.viewMode,
+        initialLayout: settings.layout,
+        initialSortOption: settings.sortOption,
+        isAscending: settings.isAscending,
+      ),
+    );
+
+    if (result != null) {
+      ref
+          .read(fileSettingsProvider.notifier)
+          .updateAll(
+            viewMode: result['viewMode'],
+            layout: result['layout'],
+            sortOption: result['sortOption'],
+            isAscending: result['isAscending'],
+          );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -96,16 +125,14 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
                 IconButton(
-                  onPressed: () {
-                    // Toggle grid view logic
-                  },
+                  onPressed: _showFileSettings,
                   icon: Icon(
                     Icons.grid_view,
                     color: Theme.of(
                       context,
                     ).colorScheme.onSurface.withOpacity(0.6),
                   ),
-                  tooltip: 'Toggle Grid View',
+                  tooltip: 'View Settings',
                 ),
                 IconButton(
                   onPressed: () {

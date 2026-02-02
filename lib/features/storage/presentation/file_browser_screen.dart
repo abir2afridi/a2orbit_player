@@ -1,12 +1,15 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/services/folder_scan_service.dart';
 import '../../../core/utils/permission_helper.dart';
+import '../models/file_view_settings.dart';
+import '../providers/file_settings_provider.dart';
 import 'video_list_screen.dart';
 
-class FileBrowserScreen extends StatefulWidget {
+class FileBrowserScreen extends ConsumerStatefulWidget {
   final bool isEmbedded;
   final String searchQuery;
   const FileBrowserScreen({
@@ -16,15 +19,14 @@ class FileBrowserScreen extends StatefulWidget {
   });
 
   @override
-  State<FileBrowserScreen> createState() => _FileBrowserScreenState();
+  ConsumerState<FileBrowserScreen> createState() => _FileBrowserScreenState();
 }
 
-class _FileBrowserScreenState extends State<FileBrowserScreen> {
+class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
   Map<String, List<File>> _foldersWithVideos = {};
   List<String> _filteredFolderPaths = [];
   bool _isLoading = true;
   bool _isRefreshing = false;
-  bool _isGridView = false;
   String _searchQuery = '';
   bool _isPermissionDialogVisible = false;
 
@@ -287,6 +289,9 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final settings = ref.watch(fileSettingsProvider);
+    final isGridView = settings.layout == FileLayout.grid;
+
     final content = Column(
       children: [
         if (_isRefreshing && !_isLoading)
@@ -296,7 +301,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
               ? const Center(child: CircularProgressIndicator())
               : _filteredFolderPaths.isEmpty
               ? _buildEmptyState()
-              : _isGridView
+              : isGridView
               ? _buildFolderGrid()
               : _buildFolderList(),
         ),
@@ -322,12 +327,12 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
         actions: [
           IconButton(
             onPressed: () {
-              setState(() {
-                _isGridView = !_isGridView;
-              });
+              ref
+                  .read(fileSettingsProvider.notifier)
+                  .setLayout(isGridView ? FileLayout.list : FileLayout.grid);
             },
-            icon: Icon(_isGridView ? Icons.list : Icons.grid_view),
-            tooltip: _isGridView ? 'List View' : 'Grid View',
+            icon: Icon(isGridView ? Icons.list : Icons.grid_view),
+            tooltip: isGridView ? 'List View' : 'Grid View',
           ),
         ],
       ),
