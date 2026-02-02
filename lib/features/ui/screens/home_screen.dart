@@ -8,6 +8,7 @@ import '../../storage/presentation/widgets/file_view_settings_bottom_sheet.dart'
 import '../../storage/providers/file_settings_provider.dart';
 import 'me_screen.dart';
 import 'music_screen.dart';
+import 'transfer_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -51,7 +52,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     // Hide default AppBar for Music (index 1) and Me (index 3)
-    final bool hideDefaultAppBar = _currentIndex == 1 || _currentIndex == 3;
+    final bool hideDefaultAppBar =
+        _currentIndex == 1 || _currentIndex == 2 || _currentIndex == 3;
 
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.background,
@@ -182,7 +184,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               children: [
                 FileBrowserScreen(isEmbedded: true, searchQuery: _searchQuery),
                 const MusicScreen(),
-                const Center(child: Text('Transfer Screen')),
+                const TransferScreen(),
                 const MeScreen(),
               ],
             ),
