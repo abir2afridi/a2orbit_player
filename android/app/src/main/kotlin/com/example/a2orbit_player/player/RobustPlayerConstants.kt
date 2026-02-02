@@ -32,6 +32,13 @@ object RobustPlayerConstants {
         const val LOCK_ROTATION = "lockRotation"
         const val ENABLE_GESTURES = "enableGestures"
         const val DISPOSE = "disposePlayer"
+        const val SET_ORIENTATION = "setOrientation"
+        const val GET_CURRENT_ORIENTATION = "getCurrentOrientation"
+        const val SET_AUTO_ROTATE_ENABLED = "setAutoRotateEnabled"
+        const val IS_AUTO_ROTATE_ENABLED = "isAutoRotateEnabled"
+        const val SET_ORIENTATION_LOCKED = "setOrientationLocked"
+        const val IS_ORIENTATION_LOCKED = "isOrientationLocked"
+        const val TOGGLE_ORIENTATION = "toggleOrientation"
     }
     
     // Error codes

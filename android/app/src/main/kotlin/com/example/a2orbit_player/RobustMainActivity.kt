@@ -127,7 +127,70 @@ class RobustMainActivity : FlutterActivity() {
                     manager.setAspectRatio(viewId, resizeMode)
                     result.success(null)
                 }
-                
+
+                RobustPlayerConstants.Methods.SET_ORIENTATION -> {
+                    val orientation = call.argument<String>("orientation")
+                    if (viewId == null || orientation.isNullOrBlank()) {
+                        result.error("invalid_args", "viewId and orientation required", null)
+                        return
+                    }
+                    manager.setOrientation(viewId, orientation)
+                    result.success(null)
+                }
+
+                RobustPlayerConstants.Methods.GET_CURRENT_ORIENTATION -> {
+                    if (viewId == null) {
+                        result.error("invalid_args", "viewId required", null)
+                        return
+                    }
+                    result.success(manager.getCurrentOrientation(viewId))
+                }
+
+                RobustPlayerConstants.Methods.SET_AUTO_ROTATE_ENABLED -> {
+                    val enabled = call.argument<Boolean>("enabled")
+                    if (viewId == null || enabled == null) {
+                        result.error("invalid_args", "viewId and enabled required", null)
+                        return
+                    }
+                    manager.setAutoRotateEnabled(viewId, enabled)
+                    result.success(null)
+                }
+
+                RobustPlayerConstants.Methods.IS_AUTO_ROTATE_ENABLED -> {
+                    if (viewId == null) {
+                        result.error("invalid_args", "viewId required", null)
+                        return
+                    }
+                    result.success(manager.isAutoRotateEnabled(viewId))
+                }
+
+                RobustPlayerConstants.Methods.SET_ORIENTATION_LOCKED -> {
+                    val locked = call.argument<Boolean>("locked")
+                    if (viewId == null || locked == null) {
+                        result.error("invalid_args", "viewId and locked required", null)
+                        return
+                    }
+                    manager.setOrientationLocked(viewId, locked)
+                    result.success(null)
+                }
+
+                RobustPlayerConstants.Methods.IS_ORIENTATION_LOCKED -> {
+                    if (viewId == null) {
+                        result.error("invalid_args", "viewId required", null)
+                        return
+                    }
+                    result.success(manager.isOrientationLocked(viewId))
+                }
+
+                RobustPlayerConstants.Methods.TOGGLE_ORIENTATION -> {
+                    if (viewId == null) {
+                        result.error("invalid_args", "viewId required", null)
+                        return
+                    }
+                    manager.toggleOrientation(viewId)
+                    result.success(null)
+                }
+
                 RobustPlayerConstants.Methods.GET_VIDEO_INFO -> {
                     if (viewId == null) {
                         result.error("invalid_args", "viewId required", null)

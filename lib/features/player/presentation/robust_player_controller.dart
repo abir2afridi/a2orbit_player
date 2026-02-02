@@ -46,8 +46,14 @@ class RobustPlayerController {
     }
   }
 
-  Future<void> setSource(String path, {List<String> subtitles = const []}) async {
-    await _invoke<void>('setDataSource', {'path': path, 'subtitles': subtitles});
+  Future<void> setSource(
+    String path, {
+    List<String> subtitles = const [],
+  }) async {
+    await _invoke<void>('setDataSource', {
+      'path': path,
+      'subtitles': subtitles,
+    });
   }
 
   Future<void> play() async {
@@ -66,7 +72,10 @@ class RobustPlayerController {
   Future<void> setAspectRatio(int resizeMode) async =>
       _invoke<void>('setAspectRatio', {'resizeMode': resizeMode});
 
-  Future<void> enterPictureInPicture() async => _invoke<void>('enterPiP');
+  Future<bool> enterPictureInPicture() async {
+    final result = await _invoke<bool>('enterPictureInPicture');
+    return result ?? false;
+  }
 
   Future<void> lockRotation(bool lock) async =>
       _invoke<void>('lockRotation', {'lock': lock});
@@ -78,6 +87,88 @@ class RobustPlayerController {
     final result = await _invoke<Map<dynamic, dynamic>>('getVideoInformation');
     return result?.cast<String, dynamic>();
   }
+
+  Future<void> loadSubtitles(List<String> subtitlePaths) async =>
+      _invoke<void>('loadSubtitles', {'subtitlePaths': subtitlePaths});
+
+  Future<void> setSubtitlesEnabled(bool enabled) async =>
+      _invoke<void>('setSubtitlesEnabled', {'enabled': enabled});
+
+  Future<void> selectSubtitleTrack(int index) async =>
+      _invoke<void>('selectSubtitleTrack', {'index': index});
+
+  Future<List<Map<String, dynamic>>> getSubtitleTracks() async {
+    final result = await _invoke<List<dynamic>>('getSubtitleTracks');
+    return result?.cast<Map<String, dynamic>>() ?? [];
+  }
+
+  Future<List<Map<String, dynamic>>> getAudioTracks() async {
+    final result = await _invoke<List<dynamic>>('getAudioTracks');
+    return result?.cast<Map<String, dynamic>>() ?? [];
+  }
+
+  Future<void> selectAudioTrack(int groupIndex, int trackIndex) async =>
+      _invoke<void>('selectAudioTrack', {
+        'groupIndex': groupIndex,
+        'trackIndex': trackIndex,
+      });
+
+  Future<Map<String, dynamic>?> getCurrentAudioTrack() async {
+    final result = await _invoke<Map<dynamic, dynamic>>('getCurrentAudioTrack');
+    return result?.cast<String, dynamic>();
+  }
+
+  Future<void> exitPictureInPicture() async =>
+      _invoke<void>('exitPictureInPicture');
+
+  Future<bool> isInPictureInPictureMode() async {
+    final result = await _invoke<bool>('isInPictureInPictureMode');
+    return result ?? false;
+  }
+
+  Future<void> setBackgroundPlaybackEnabled(bool enabled) async =>
+      _invoke<void>('setBackgroundPlaybackEnabled', {'enabled': enabled});
+
+  Future<bool> isBackgroundPlaybackEnabled() async {
+    final result = await _invoke<bool>('isBackgroundPlaybackEnabled');
+    return result ?? false;
+  }
+
+  Future<void> enableAudioOnlyMode() async =>
+      _invoke<void>('enableAudioOnlyMode');
+
+  Future<void> disableAudioOnlyMode() async =>
+      _invoke<void>('disableAudioOnlyMode');
+
+  Future<void> onAppBackgrounded() async => _invoke<void>('onAppBackgrounded');
+
+  Future<void> onAppForegrounded() async => _invoke<void>('onAppForegrounded');
+
+  Future<void> setOrientation(String orientation) async =>
+      _invoke<void>('setOrientation', {'orientation': orientation});
+
+  Future<String> getCurrentOrientation() async {
+    final result = await _invoke<String>('getCurrentOrientation');
+    return result ?? 'AUTO';
+  }
+
+  Future<void> setAutoRotateEnabled(bool enabled) async =>
+      _invoke<void>('setAutoRotateEnabled', {'enabled': enabled});
+
+  Future<bool> isAutoRotateEnabled() async {
+    final result = await _invoke<bool>('isAutoRotateEnabled');
+    return result ?? true;
+  }
+
+  Future<void> setOrientationLocked(bool locked) async =>
+      _invoke<void>('setOrientationLocked', {'locked': locked});
+
+  Future<bool> isOrientationLocked() async {
+    final result = await _invoke<bool>('isOrientationLocked');
+    return result ?? false;
+  }
+
+  Future<void> toggleOrientation() async => _invoke<void>('toggleOrientation');
 
   void _handleEvent(dynamic event) {
     final viewId = _viewId;
@@ -123,16 +214,26 @@ class RobustPlayerController {
         );
         break;
       case 'tracksChanged':
-        final audioTracks = (event['audioTracks'] as List<dynamic>?)
-                ?.map((e) => RobustAudioTrack.fromMap(e as Map<dynamic, dynamic>))
+        final audioTracks =
+            (event['audioTracks'] as List<dynamic>?)
+                ?.map(
+                  (e) => RobustAudioTrack.fromMap(e as Map<dynamic, dynamic>),
+                )
                 .toList() ??
             [];
-        final subtitleTracks = (event['subtitleTracks'] as List<dynamic>?)
-                ?.map((e) => RobustSubtitleTrack.fromMap(e as Map<dynamic, dynamic>))
+        final subtitleTracks =
+            (event['subtitleTracks'] as List<dynamic>?)
+                ?.map(
+                  (e) =>
+                      RobustSubtitleTrack.fromMap(e as Map<dynamic, dynamic>),
+                )
                 .toList() ??
             [];
         _eventController.add(
-          RobustTracksChangedEvent(audioTracks: audioTracks, subtitleTracks: subtitleTracks),
+          RobustTracksChangedEvent(
+            audioTracks: audioTracks,
+            subtitleTracks: subtitleTracks,
+          ),
         );
         break;
       case 'gesture':
@@ -141,6 +242,83 @@ class RobustPlayerController {
         if (action != null) {
           _eventController.add(RobustGestureEvent(action, value));
         }
+        break;
+      case 'brightnessChanged':
+        final brightness = (event['brightness'] as num?)?.toDouble() ?? 0.0;
+        _eventController.add(RobustBrightnessChangedEvent(brightness));
+        break;
+      case 'volumeChanged':
+        final volume = (event['volume'] as num?)?.toInt() ?? 0;
+        final maxVolume = (event['maxVolume'] as num?)?.toInt() ?? 15;
+        _eventController.add(RobustVolumeChangedEvent(volume, maxVolume));
+        break;
+      case 'seek':
+        final position = Duration(
+          milliseconds: (event['position'] as num?)?.toInt() ?? 0,
+        );
+        final duration = Duration(
+          milliseconds: (event['duration'] as num?)?.toInt() ?? 0,
+        );
+        _eventController.add(RobustSeekEvent(position, duration));
+        break;
+      case 'zoom':
+        final scale = (event['scale'] as num?)?.toDouble() ?? 1.0;
+        _eventController.add(RobustZoomEvent(scale));
+        break;
+      case 'subtitleStateChanged':
+        final enabled = event['enabled'] as bool? ?? false;
+        _eventController.add(RobustSubtitleStateChangedEvent(enabled));
+        break;
+      case 'subtitleTrackChanged':
+        final index = (event['index'] as num?)?.toInt() ?? 0;
+        _eventController.add(RobustSubtitleTrackChangedEvent(index));
+        break;
+      case 'audioTrackChanged':
+        final groupIndex = (event['groupIndex'] as num?)?.toInt() ?? 0;
+        final trackIndex = (event['trackIndex'] as num?)?.toInt() ?? 0;
+        _eventController.add(
+          RobustAudioTrackChangedEvent(groupIndex, trackIndex),
+        );
+        break;
+      case 'audioTracksChanged':
+        final tracks =
+            (event['tracks'] as List<dynamic>?)
+                ?.map((e) => Map<String, dynamic>.from(e as Map))
+                .toList() ??
+            [];
+        _eventController.add(RobustAudioTracksChangedEvent(tracks));
+        break;
+      case 'pipModeChanged':
+        final isInPiP = event['isInPiP'] as bool? ?? false;
+        _eventController.add(RobustPiPModeChangedEvent(isInPiP));
+        break;
+      case 'backgroundPlaybackChanged':
+        final enabled = event['enabled'] as bool? ?? false;
+        _eventController.add(RobustBackgroundPlaybackChangedEvent(enabled));
+        break;
+      case 'audioOnlyModeChanged':
+        final enabled = event['enabled'] as bool? ?? false;
+        _eventController.add(RobustAudioOnlyModeChangedEvent(enabled));
+        break;
+      case 'kidsLockChanged':
+        final enabled = event['enabled'] as bool? ?? false;
+        _eventController.add(RobustKidsLockChangedEvent(enabled));
+        break;
+      case 'orientationChanged':
+        final orientation = event['orientation'] as String? ?? 'AUTO';
+        _eventController.add(RobustOrientationChangedEvent(orientation));
+        break;
+      case 'autoRotateChanged':
+        final enabled = event['enabled'] as bool? ?? false;
+        _eventController.add(RobustAutoRotateChangedEvent(enabled));
+        break;
+      case 'orientationLockChanged':
+        final locked = event['locked'] as bool? ?? false;
+        _eventController.add(RobustOrientationLockChangedEvent(locked));
+        break;
+      case 'deviceOrientationChanged':
+        final orientation = event['orientation'] as String? ?? 'UNKNOWN';
+        _eventController.add(RobustDeviceOrientationChangedEvent(orientation));
         break;
       default:
         break;
@@ -210,6 +388,105 @@ class RobustGestureEvent extends RobustPlayerEvent {
   final String value;
 }
 
+class RobustBrightnessChangedEvent extends RobustPlayerEvent {
+  const RobustBrightnessChangedEvent(this.brightness);
+
+  final double brightness;
+}
+
+class RobustVolumeChangedEvent extends RobustPlayerEvent {
+  const RobustVolumeChangedEvent(this.volume, this.maxVolume);
+
+  final int volume;
+  final int maxVolume;
+}
+
+class RobustSeekEvent extends RobustPlayerEvent {
+  const RobustSeekEvent(this.position, this.duration);
+
+  final Duration position;
+  final Duration duration;
+}
+
+class RobustZoomEvent extends RobustPlayerEvent {
+  const RobustZoomEvent(this.scale);
+
+  final double scale;
+}
+
+class RobustSubtitleStateChangedEvent extends RobustPlayerEvent {
+  const RobustSubtitleStateChangedEvent(this.enabled);
+
+  final bool enabled;
+}
+
+class RobustSubtitleTrackChangedEvent extends RobustPlayerEvent {
+  const RobustSubtitleTrackChangedEvent(this.index);
+
+  final int index;
+}
+
+class RobustAudioTrackChangedEvent extends RobustPlayerEvent {
+  const RobustAudioTrackChangedEvent(this.groupIndex, this.trackIndex);
+
+  final int groupIndex;
+  final int trackIndex;
+}
+
+class RobustAudioTracksChangedEvent extends RobustPlayerEvent {
+  const RobustAudioTracksChangedEvent(this.tracks);
+
+  final List<Map<String, dynamic>> tracks;
+}
+
+class RobustPiPModeChangedEvent extends RobustPlayerEvent {
+  const RobustPiPModeChangedEvent(this.isInPiP);
+
+  final bool isInPiP;
+}
+
+class RobustBackgroundPlaybackChangedEvent extends RobustPlayerEvent {
+  const RobustBackgroundPlaybackChangedEvent(this.enabled);
+
+  final bool enabled;
+}
+
+class RobustAudioOnlyModeChangedEvent extends RobustPlayerEvent {
+  const RobustAudioOnlyModeChangedEvent(this.enabled);
+
+  final bool enabled;
+}
+
+class RobustKidsLockChangedEvent extends RobustPlayerEvent {
+  const RobustKidsLockChangedEvent(this.enabled);
+
+  final bool enabled;
+}
+
+class RobustOrientationChangedEvent extends RobustPlayerEvent {
+  const RobustOrientationChangedEvent(this.orientation);
+
+  final String orientation;
+}
+
+class RobustAutoRotateChangedEvent extends RobustPlayerEvent {
+  const RobustAutoRotateChangedEvent(this.enabled);
+
+  final bool enabled;
+}
+
+class RobustOrientationLockChangedEvent extends RobustPlayerEvent {
+  const RobustOrientationLockChangedEvent(this.locked);
+
+  final bool locked;
+}
+
+class RobustDeviceOrientationChangedEvent extends RobustPlayerEvent {
+  const RobustDeviceOrientationChangedEvent(this.orientation);
+
+  final String orientation;
+}
+
 class RobustAudioTrack {
   RobustAudioTrack({
     required this.groupIndex,
@@ -219,7 +496,8 @@ class RobustAudioTrack {
     required this.label,
   });
 
-  factory RobustAudioTrack.fromMap(Map<dynamic, dynamic> map) => RobustAudioTrack(
+  factory RobustAudioTrack.fromMap(Map<dynamic, dynamic> map) =>
+      RobustAudioTrack(
         groupIndex: (map['groupIndex'] as num?)?.toInt() ?? 0,
         trackIndex: (map['trackIndex'] as num?)?.toInt() ?? 0,
         id: map['id']?.toString() ?? '',
@@ -242,7 +520,8 @@ class RobustSubtitleTrack {
     required this.label,
   });
 
-  factory RobustSubtitleTrack.fromMap(Map<dynamic, dynamic> map) => RobustSubtitleTrack(
+  factory RobustSubtitleTrack.fromMap(Map<dynamic, dynamic> map) =>
+      RobustSubtitleTrack(
         groupIndex: (map['groupIndex'] as num?)?.toInt() ?? 0,
         trackIndex: (map['trackIndex'] as num?)?.toInt() ?? 0,
         language: map['language']?.toString() ?? 'Unknown',

@@ -151,8 +151,8 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
       int cmp;
       switch (settings.sortOption) {
         case FileSortOption.date:
-          final aDate = FileSystemEntity.statSync(a).modified;
-          final bDate = FileSystemEntity.statSync(b).modified;
+          final aDate = File(a).statSync().modified;
+          final bDate = File(b).statSync().modified;
           cmp = aDate.compareTo(bDate);
           break;
         case FileSortOption.size:

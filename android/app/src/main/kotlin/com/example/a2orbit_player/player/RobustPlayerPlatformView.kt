@@ -30,26 +30,50 @@ class RobustPlayerPlatformView(
             // Attach controller to view
             controller.attachPlayerView(robustPlayerView.playerView)
             
-            // Set up gesture handling
+            // Set up enhanced gesture handling
             robustPlayerView.setGestureListener(object : RobustPlayerView.GestureListener {
                 override fun onSingleTap() {
-                    // Handle single tap if needed
+                    controller.emitEvent(
+                        RobustExoPlayerController.PlayerEvent.Gesture("single_tap")
+                    )
                 }
 
                 override fun onDoubleTap(isRightHalf: Boolean) {
-                    // Handle double tap if needed
+                    val action = if (isRightHalf) "double_tap_forward" else "double_tap_rewind"
+                    controller.emitEvent(
+                        RobustExoPlayerController.PlayerEvent.Gesture(action)
+                    )
+                }
+
+                override fun onLongPress() {
+                    controller.emitEvent(
+                        RobustExoPlayerController.PlayerEvent.Gesture("long_press")
+                    )
                 }
 
                 override fun onVerticalScroll(isLeftHalf: Boolean, delta: Float) {
-                    // Handle vertical scroll if needed
+                    val action = if (isLeftHalf) "brightness" else "volume"
+                    controller.emitEvent(
+                        RobustExoPlayerController.PlayerEvent.Gesture(action, delta.toString())
+                    )
                 }
 
                 override fun onHorizontalScroll(delta: Float) {
-                    // Handle horizontal scroll if needed
+                    controller.emitEvent(
+                        RobustExoPlayerController.PlayerEvent.Gesture("seek", delta.toString())
+                    )
+                }
+
+                override fun onPinchZoom(scale: Float) {
+                    controller.emitEvent(
+                        RobustExoPlayerController.PlayerEvent.Gesture("pinch_zoom", scale.toString())
+                    )
                 }
 
                 override fun onGestureEnd() {
-                    // Handle gesture end if needed
+                    controller.emitEvent(
+                        RobustExoPlayerController.PlayerEvent.Gesture("gesture_end")
+                    )
                 }
             })
 

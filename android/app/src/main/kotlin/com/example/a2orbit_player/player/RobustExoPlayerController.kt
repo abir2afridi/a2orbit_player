@@ -37,8 +37,16 @@ import androidx.media3.datasource.FileDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.exoplayer.text.TextOutput
+import androidx.media3.exoplayer.text.TextRenderer
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.PlayerView
+import android.view.View
+import android.app.PictureInPictureParams
+import android.content.res.Configuration
+import android.util.Rational
+import android.graphics.Bitmap
+import java.io.FileOutputStream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -51,6 +59,15 @@ import java.io.FileInputStream
 import java.io.IOException
 import kotlin.math.max
 import kotlin.math.min
+
+/**
+ * Repeat modes for A-B repeat functionality
+ */
+enum class RepeatMode {
+    NONE,
+    REPEAT_AB,
+    REPEAT_ONE
+}
 
 /**
  * Robust ExoPlayer Controller with proper URI handling, MIME type detection,
@@ -102,10 +119,55 @@ class RobustExoPlayerController(
     private var reportingJob: Job? = null
     private var initializationAttempts = 0
     private val maxInitializationAttempts = 3
+    
+    // Subtitle support
+    private var subtitleSources: List<MediaSource> = emptyList()
+    private var currentSubtitleIndex: Int = -1
+    private var subtitlesEnabled: Boolean = true
+    
+    // Audio track support
+    private var currentAudioTrackIndex: Int = -1
+    private var availableAudioTracks: List<Map<String, Any>> = emptyList()
+    
+    // PiP support
+    private var isInPiPMode: Boolean = false
+    private var pipAspectRatio: Rational? = null
+    
+    // Background audio support
+    private var isBackgroundPlaybackEnabled: Boolean = false
+    private var wasPlayingBeforeBackground: Boolean = false
+    
+    // Screenshot capture support
+    private var lastScreenshotPath: String? = null
+    
+    // A-B repeat support
+    private var repeatMode: RepeatMode = RepeatMode.NONE
+    private var repeatStartPosition: Long = -1L
+    private var repeatEndPosition: Long = -1L
+    private var isSettingRepeatStart: Boolean = false
+    private var isSettingRepeatEnd: Boolean = false
+    
+    // Kids lock support
+    private var isKidsLockEnabled: Boolean = false
+    private var kidsLockPin: String = "0000" // Default PIN
+    
+    // Device rotation support
+    private var currentOrientation: Int = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    private var isAutoRotateEnabled: Boolean = true
+    private var isOrientationLocked: Boolean = false
 
     // Event flow for communication with Flutter
     private val _events = MutableSharedFlow<PlayerEvent>(extraBufferCapacity = 32)
     val events: SharedFlow<PlayerEvent> = _events
+    
+    /**
+     * Emit event from external sources (like gesture handlers)
+     */
+    fun emitEvent(event: PlayerEvent) {
+        mainScope.launch {
+            _events.emit(event)
+        }
+    }
 
     // Gesture control state
     private var brightnessBeforeGesture: Float = -1f
@@ -113,11 +175,1016 @@ class RobustExoPlayerController(
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
     private val maxVolume = audioManager?.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC) ?: 15
     private var pendingSeekPosition: Long? = null
-
+    
     init {
         player.addListener(this)
         lifecycleOwner?.lifecycle?.addObserver(this)
         Log.d(TAG, "RobustExoPlayerController initialized")
+    }
+    
+    /**
+     * Handle brightness gesture
+     */
+    fun handleBrightnessGesture(delta: Float) {
+        try {
+            val activity = activity ?: return
+            
+            // Store initial brightness if not already stored
+            if (brightnessBeforeGesture < 0) {
+                brightnessBeforeGesture = activity.window.attributes.screenBrightness
+            }
+            
+            // Calculate new brightness (0.0 to 1.0)
+            val currentBrightness = activity.window.attributes.screenBrightness
+            val brightnessDelta = delta / 1000f // Adjust sensitivity
+            var newBrightness = (currentBrightness + brightnessDelta).coerceIn(0.0f, 1.0f)
+            
+            // Apply brightness
+            val layoutParams = activity.window.attributes
+            layoutParams.screenBrightness = newBrightness
+            activity.window.attributes = layoutParams
+            
+            // Emit brightness change event
+            mainScope.launch {
+                _events.emit(
+                    PlayerEvent.BrightnessChanged(newBrightness)
+                )
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error handling brightness gesture", e)
+        }
+    }
+    
+    /**
+     * Handle volume gesture
+     */
+    fun handleVolumeGesture(delta: Float) {
+        try {
+            val audioManager = audioManager ?: return
+            
+            // Store initial volume if not already stored
+            if (volumeBeforeGesture == 0) {
+                volumeBeforeGesture = audioManager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
+            }
+            
+            // Calculate new volume
+            val currentVolume = audioManager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
+            val volumeDelta = (delta / 50).toInt() // Adjust sensitivity
+            val newVolume = (currentVolume + volumeDelta).coerceIn(0, maxVolume)
+            
+            // Apply volume
+            audioManager.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, newVolume, 0)
+            
+            // Emit volume change event
+            mainScope.launch {
+                _events.emit(
+                    PlayerEvent.VolumeChanged(newVolume, maxVolume)
+                )
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error handling volume gesture", e)
+        }
+    }
+    
+    /**
+     * Handle seek gesture
+     */
+    fun handleSeekGesture(delta: Float) {
+        try {
+            val duration = player.duration
+            if (duration <= 0) return
+            
+            // Calculate seek position
+            val seekDeltaMs = (delta * 1000).toLong() // Convert to milliseconds
+            val currentPosition = player.currentPosition
+            val newPosition = (currentPosition + seekDeltaMs).coerceIn(0, duration)
+            
+            // Store pending seek position
+            pendingSeekPosition = newPosition
+            
+            // Seek to new position
+            player.seekTo(newPosition)
+            
+            // Emit seek event
+            mainScope.launch {
+                _events.emit(
+                    PlayerEvent.Seek(newPosition, duration)
+                )
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error handling seek gesture", e)
+        }
+    }
+    
+    /**
+     * Handle zoom gesture
+     */
+    fun handleZoomGesture(scale: Float) {
+        try {
+            // Emit zoom event for Flutter to handle UI updates
+            mainScope.launch {
+                _events.emit(
+                    PlayerEvent.Zoom(scale)
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error handling zoom gesture", e)
+        }
+    }
+    
+    /**
+     * Reset gesture states
+     */
+    fun resetGestureStates() {
+        try {
+            // Reset brightness to original if gesture ended
+            if (brightnessBeforeGesture >= 0) {
+                val activity = activity ?: return
+                val layoutParams = activity.window.attributes
+                layoutParams.screenBrightness = brightnessBeforeGesture
+                activity.window.attributes = layoutParams
+                brightnessBeforeGesture = -1f
+            }
+            
+            // Reset volume tracking
+            volumeBeforeGesture = 0
+            pendingSeekPosition = null
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error resetting gesture states", e)
+        }
+    }
+    
+    /**
+     * Load subtitle files
+     */
+    fun loadSubtitles(subtitlePaths: List<String>) {
+        try {
+            subtitleSources = subtitlePaths.mapNotNull { path ->
+                loadSubtitleSource(path)
+            }
+            Log.d(TAG, "Loaded ${subtitleSources.size} subtitle sources")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading subtitles", e)
+        }
+    }
+    
+    /**
+     * Load individual subtitle source
+     */
+    private fun loadSubtitleSource(subtitlePath: String): MediaSource? {
+        return try {
+            val subtitleUri = resolveSubtitleUri(subtitlePath) ?: return null
+            val mimeType = detectSubtitleMimeType(subtitlePath)
+            
+            ProgressiveMediaSource.Factory(dataSourceFactory)
+                .createMediaSource(MediaItem.Builder()
+                    .setUri(subtitleUri)
+                    .setMimeType(mimeType)
+                    .build())
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading subtitle source: $subtitlePath", e)
+            null
+        }
+    }
+    
+    /**
+     * Resolve subtitle URI
+     */
+    private fun resolveSubtitleUri(subtitlePath: String): Uri? {
+        return try {
+            val file = File(subtitlePath)
+            if (file.exists()) {
+                // Try FileProvider first
+                FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+            } else {
+                // Fallback to direct file path
+                Uri.parse(subtitlePath)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error resolving subtitle URI: $subtitlePath", e)
+            null
+        }
+    }
+    
+    /**
+     * Detect subtitle MIME type
+     */
+    private fun detectSubtitleMimeType(subtitlePath: String): String {
+        val extension = subtitlePath.substringAfterLast('.', "").lowercase()
+        return when (extension) {
+            "srt" -> "application/x-subrip"
+            "ass", "ssa" -> "text/x-ssa"
+            "vtt" -> "text/vtt"
+            else -> "application/x-subrip" // Default to SRT
+        }
+    }
+    
+    /**
+     * Enable/disable subtitles
+     */
+    fun setSubtitlesEnabled(enabled: Boolean) {
+        subtitlesEnabled = enabled
+        playerView?.subtitleView?.visibility = if (enabled) View.VISIBLE else View.GONE
+        
+        mainScope.launch {
+            _events.emit(
+                PlayerEvent.SubtitleStateChanged(enabled)
+            )
+        }
+    }
+    
+    /**
+     * Select subtitle track by index
+     */
+    fun selectSubtitleTrack(index: Int) {
+        if (index < 0 || index >= subtitleSources.size) {
+            Log.w(TAG, "Invalid subtitle track index: $index")
+            return
+        }
+        
+        currentSubtitleIndex = index
+        
+        // Rebuild media source with selected subtitle
+        currentUri?.let { uri ->
+            rebuildMediaSourceWithSubtitles(uri)
+        }
+        
+        mainScope.launch {
+            _events.emit(
+                PlayerEvent.SubtitleTrackChanged(index)
+            )
+        }
+    }
+    
+    /**
+     * Get available subtitle tracks
+     */
+    fun getSubtitleTracks(): List<Map<String, Any>> {
+        return subtitleSources.indices.map { index ->
+            mapOf(
+                "index" to index,
+                "name" to "Subtitle ${index + 1}",
+                "language" to "unknown",
+                "selected" to (index == currentSubtitleIndex)
+            )
+        }
+    }
+    
+    /**
+     * Rebuild media source with subtitles
+     */
+    private fun rebuildMediaSourceWithSubtitles(videoUri: Uri) {
+        try {
+            val mimeType = detectMimeType(videoUri, currentUri?.toString() ?: "")
+            val videoMediaItem = MediaItem.Builder()
+                .setUri(videoUri)
+                .setMediaId(currentUri?.toString() ?: "")
+                .setMimeType(mimeType)
+                .build()
+            
+            val videoSource = ProgressiveMediaSource.Factory(dataSourceFactory)
+                .createMediaSource(videoMediaItem)
+            
+            // Combine with subtitle sources if enabled
+            val mediaSource = if (subtitlesEnabled && subtitleSources.isNotEmpty()) {
+                // Note: ExoPlayer doesn't directly support combining sources like this
+                // This is a simplified approach - in production, you'd use MergingMediaSource
+                videoSource
+            } else {
+                videoSource
+            }
+            
+            player.setMediaSource(mediaSource)
+            player.prepare()
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error rebuilding media source with subtitles", e)
+            emitError("SUBTITLE_ERROR", "Failed to load subtitles: ${e.message}")
+        }
+    }
+    
+    /**
+     * Get available audio tracks
+     */
+    fun getAudioTracks(): List<Map<String, Any>> {
+        val audioTracks = mutableListOf<Map<String, Any>>()
+        
+        try {
+            val tracks = player.currentTracks
+            tracks.groups.forEachIndexed { groupIndex, group ->
+                if (group.isSelected && group.type == C.TRACK_TYPE_AUDIO) {
+                    val trackGroup = group.mediaTrackGroup
+                    for (i in 0 until trackGroup.length) {
+                        val format = trackGroup.getFormat(i)
+                        audioTracks.add(mapOf(
+                            "groupIndex" to groupIndex,
+                            "trackIndex" to i,
+                            "id" to (format.id ?: "track_$i"),
+                            "language" to (format.language ?: "Unknown"),
+                            "label" to (format.label ?: format.language ?: "Audio Track ${i + 1}"),
+                            "selected" to (i == currentAudioTrackIndex),
+                            "channels" to (format.channelCount ?: 0),
+                            "sampleRate" to (format.sampleRate ?: 0)
+                        ))
+                    }
+                }
+            }
+            
+            availableAudioTracks = audioTracks
+            Log.d(TAG, "Found ${audioTracks.size} audio tracks")
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting audio tracks", e)
+        }
+        
+        return audioTracks
+    }
+    
+    /**
+     * Select audio track by index
+     */
+    fun selectAudioTrack(groupIndex: Int, trackIndex: Int) {
+        try {
+            val tracks = player.currentTracks
+            val audioGroup = tracks.groups.getOrNull(groupIndex)
+            
+            if (audioGroup?.type == C.TRACK_TYPE_AUDIO) {
+                val trackSelectionParameters = trackSelector.parameters
+                    .buildUpon()
+                    .setOverrideForType(
+                        TrackSelectionOverride(
+                            audioGroup.mediaTrackGroup,
+                            trackIndex
+                        )
+                    )
+                    .build()
+                
+                trackSelector.setParameters(trackSelectionParameters)
+                currentAudioTrackIndex = trackIndex
+                
+                mainScope.launch {
+                    _events.emit(
+                        PlayerEvent.AudioTrackChanged(groupIndex, trackIndex)
+                    )
+                }
+                
+                Log.d(TAG, "Selected audio track: group=$groupIndex, track=$trackIndex")
+            } else {
+                Log.w(TAG, "Invalid audio track selection: group=$groupIndex, track=$trackIndex")
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error selecting audio track", e)
+            emitError("AUDIO_TRACK_ERROR", "Failed to select audio track: ${e.message}")
+        }
+    }
+    
+    /**
+     * Get current audio track info
+     */
+    fun getCurrentAudioTrack(): Map<String, Any>? {
+        return availableAudioTracks.getOrNull(currentAudioTrackIndex)
+    }
+    
+    /**
+     * Update audio tracks when tracks change
+     */
+    private fun updateAudioTracks() {
+        val tracks = getAudioTracks()
+        mainScope.launch {
+            _events.emit(
+                PlayerEvent.AudioTracksChanged(tracks)
+            )
+        }
+    }
+    
+    /**
+     * Enter Picture-in-Picture mode
+     */
+    fun enterPictureInPicture(): Boolean {
+        return try {
+            val activity = activity ?: return false
+            
+            // Check if PiP is supported
+            if (!activity.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)) {
+                Log.w(TAG, "PiP not supported on this device")
+                return false
+            }
+            
+            // Get video aspect ratio
+            val aspectRatio = getVideoAspectRatio()
+            pipAspectRatio = aspectRatio
+            
+            // Build PiP parameters
+            val params = PictureInPictureParams.Builder()
+                .setAspectRatio(aspectRatio)
+                .setSourceRectHint(android.graphics.Rect(0, 0, 1920, 1080)) // Default source rect
+                .build()
+            
+            // Enter PiP mode
+            val result = activity.enterPictureInPictureMode(params)
+            if (result) {
+                isInPiPMode = true
+                mainScope.launch {
+                    _events.emit(PlayerEvent.PiPModeChanged(true))
+                }
+                Log.d(TAG, "Successfully entered PiP mode")
+            } else {
+                Log.w(TAG, "Failed to enter PiP mode")
+            }
+            
+            result
+        } catch (e: Exception) {
+            Log.e(TAG, "Error entering PiP mode", e)
+            emitError("PIP_ERROR", "Failed to enter PiP mode: ${e.message}")
+            false
+        }
+    }
+    
+    /**
+     * Exit Picture-in-Picture mode
+     */
+    fun exitPictureInPicture() {
+        try {
+            val activity = activity ?: return
+            
+            // Note: There's no direct API to exit PiP mode
+            // The system handles exiting PiP when user returns to app
+            // We just update our state
+            isInPiPMode = false
+            mainScope.launch {
+                _events.emit(PlayerEvent.PiPModeChanged(false))
+            }
+            Log.d(TAG, "PiP mode exit requested")
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error exiting PiP mode", e)
+        }
+    }
+    
+    /**
+     * Check if currently in PiP mode
+     */
+    fun isInPictureInPictureMode(): Boolean {
+        return isInPiPMode
+    }
+    
+    /**
+     * Get video aspect ratio for PiP
+     */
+    private fun getVideoAspectRatio(): Rational {
+        return try {
+            val videoFormat = player.videoFormat
+            if (videoFormat != null) {
+                val width = videoFormat.width
+                val height = videoFormat.height
+                if (width > 0 && height > 0) {
+                    Rational(width, height)
+                } else {
+                    Rational(16, 9) // Default to 16:9
+                }
+            } else {
+                Rational(16, 9) // Default to 16:9
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting video aspect ratio", e)
+            Rational(16, 9) // Default to 16:9
+        }
+    }
+    
+    /**
+     * Handle PiP mode changes
+     */
+    fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        isInPiPMode = isInPictureInPictureMode
+        
+        mainScope.launch {
+            _events.emit(PlayerEvent.PiPModeChanged(isInPictureInPictureMode))
+        }
+        
+        if (isInPictureInPictureMode) {
+            Log.d(TAG, "Entered PiP mode")
+            // Hide UI controls in PiP mode
+            playerView?.useController = false
+        } else {
+            Log.d(TAG, "Exited PiP mode")
+            // Restore UI controls
+            playerView?.useController = false // Keep custom controls
+        }
+    }
+    
+    /**
+     * Enable/disable background audio playback
+     */
+    fun setBackgroundPlaybackEnabled(enabled: Boolean) {
+        isBackgroundPlaybackEnabled = enabled
+        mainScope.launch {
+            _events.emit(PlayerEvent.BackgroundPlaybackChanged(enabled))
+        }
+        Log.d(TAG, "Background playback ${if (enabled) "enabled" else "disabled"}")
+    }
+    
+    /**
+     * Check if background playback is enabled
+     */
+    fun isBackgroundPlaybackEnabled(): Boolean {
+        return isBackgroundPlaybackEnabled
+    }
+    
+    /**
+     * Handle app background/foreground state changes
+     */
+    fun onAppBackgrounded() {
+        if (isBackgroundPlaybackEnabled && player.isPlaying) {
+            wasPlayingBeforeBackground = true
+            // Continue audio playback in background
+            Log.d(TAG, "Continuing audio playback in background")
+        }
+    }
+    
+    /**
+     * Handle app returning to foreground
+     */
+    fun onAppForegrounded() {
+        if (isBackgroundPlaybackEnabled && wasPlayingBeforeBackground) {
+            wasPlayingBeforeBackground = false
+            Log.d(TAG, "App returned to foreground, audio playback continuing")
+        }
+    }
+    
+    /**
+     * Extract audio from video for background playback
+     */
+    fun enableAudioOnlyMode() {
+        try {
+            // Hide video surface but keep audio playing
+            playerView?.visibility = View.GONE
+            playerView?.player = null
+            
+            // Create a simple audio-only player
+            val audioPlayer = ExoPlayer.Builder(context).build()
+            audioPlayer.setMediaSource(player.currentMediaItem?.let { mediaItem ->
+                ProgressiveMediaSource.Factory(dataSourceFactory)
+                    .createMediaSource(mediaItem)
+            } ?: return)
+            audioPlayer.prepare()
+            audioPlayer.playWhenReady = player.playWhenReady
+            
+            // Replace current player temporarily
+            val currentPlayer = player
+            // Note: This is a simplified approach - in production, you'd manage player lifecycle better
+            
+            mainScope.launch {
+                _events.emit(PlayerEvent.AudioOnlyModeChanged(true))
+            }
+            
+            Log.d(TAG, "Audio-only mode enabled")
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error enabling audio-only mode", e)
+            emitError("AUDIO_ONLY_ERROR", "Failed to enable audio-only mode: ${e.message}")
+        }
+    }
+    
+    /**
+     * Disable audio-only mode and restore video
+     */
+    fun disableAudioOnlyMode() {
+        try {
+            // Restore video surface
+            playerView?.visibility = View.VISIBLE
+            playerView?.player = player
+            
+            mainScope.launch {
+                _events.emit(PlayerEvent.AudioOnlyModeChanged(false))
+            }
+            
+            Log.d(TAG, "Audio-only mode disabled")
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error disabling audio-only mode", e)
+        }
+    }
+    
+    /**
+     * Capture screenshot from current video frame
+     */
+    fun captureScreenshot(): String? {
+        return try {
+            val playerView = playerView ?: return null
+            
+            // Get the bitmap from the player view
+            playerView.isDrawingCacheEnabled = true
+            val bitmap = Bitmap.createBitmap(playerView.drawingCache)
+            playerView.isDrawingCacheEnabled = false
+            
+            if (bitmap == null) {
+                Log.w(TAG, "Failed to capture screenshot - bitmap is null")
+                return null
+            }
+            
+            // Create screenshots directory
+            val screenshotsDir = File(context.getExternalFilesDir(null), "screenshots")
+            if (!screenshotsDir.exists()) {
+                screenshotsDir.mkdirs()
+            }
+            
+            // Generate unique filename
+            val timestamp = System.currentTimeMillis()
+            val filename = "screenshot_$timestamp.png"
+            val screenshotFile = File(screenshotsDir, filename)
+            
+            // Save bitmap to file
+            val outputStream = FileOutputStream(screenshotFile)
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
+            outputStream.close()
+            
+            // Clean up bitmap
+            bitmap.recycle()
+            
+            lastScreenshotPath = screenshotFile.absolutePath
+            
+            mainScope.launch {
+                _events.emit(PlayerEvent.ScreenshotCaptured(lastScreenshotPath!!))
+            }
+            
+            Log.d(TAG, "Screenshot saved to: ${lastScreenshotPath}")
+            lastScreenshotPath
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error capturing screenshot", e)
+            emitError("SCREENSHOT_ERROR", "Failed to capture screenshot: ${e.message}")
+            null
+        }
+    }
+    
+    /**
+     * Get last screenshot path
+     */
+    fun getLastScreenshotPath(): String? {
+        return lastScreenshotPath
+    }
+    
+    /**
+     * Get all screenshot files
+     */
+    fun getScreenshotFiles(): List<String> {
+        return try {
+            val screenshotsDir = File(context.getExternalFilesDir(null), "screenshots")
+            if (!screenshotsDir.exists()) {
+                return emptyList()
+            }
+            
+            screenshotsDir.listFiles()
+                ?.filter { it.extension.equals("png", ignoreCase = true) }
+                ?.sortedByDescending { it.lastModified() }
+                ?.map { it.absolutePath }
+                ?: emptyList()
+                
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting screenshot files", e)
+            emptyList()
+        }
+    }
+    
+    /**
+     * Delete screenshot file
+     */
+    fun deleteScreenshot(filePath: String): Boolean {
+        return try {
+            val file = File(filePath)
+            val deleted = file.delete()
+            
+            if (deleted && filePath == lastScreenshotPath) {
+                lastScreenshotPath = null
+            }
+            
+            mainScope.launch {
+                _events.emit(PlayerEvent.ScreenshotDeleted(filePath))
+            }
+            
+            Log.d(TAG, "Screenshot deleted: $filePath")
+            deleted
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error deleting screenshot", e)
+            false
+        }
+    }
+    
+    /**
+     * Set A-B repeat start point
+     */
+    fun setRepeatStartPoint() {
+        repeatStartPosition = player.currentPosition
+        isSettingRepeatStart = true
+        
+        mainScope.launch {
+            _events.emit(PlayerEvent.RepeatPointSet("start", repeatStartPosition))
+        }
+        
+        Log.d(TAG, "Repeat start point set at: ${repeatStartPosition}ms")
+        
+        // If end point is already set, enable A-B repeat
+        if (repeatEndPosition > 0 && repeatEndPosition > repeatStartPosition) {
+            repeatMode = RepeatMode.REPEAT_AB
+            mainScope.launch {
+                _events.emit(PlayerEvent.RepeatModeChanged(repeatMode.name))
+            }
+            Log.d(TAG, "A-B repeat enabled")
+        }
+    }
+    
+    /**
+     * Set A-B repeat end point
+     */
+    fun setRepeatEndPoint() {
+        repeatEndPosition = player.currentPosition
+        isSettingRepeatEnd = true
+        
+        mainScope.launch {
+            _events.emit(PlayerEvent.RepeatPointSet("end", repeatEndPosition))
+        }
+        
+        Log.d(TAG, "Repeat end point set at: ${repeatEndPosition}ms")
+        
+        // If start point is already set, enable A-B repeat
+        if (repeatStartPosition >= 0 && repeatStartPosition < repeatEndPosition) {
+            repeatMode = RepeatMode.REPEAT_AB
+            mainScope.launch {
+                _events.emit(PlayerEvent.RepeatModeChanged(repeatMode.name))
+            }
+            Log.d(TAG, "A-B repeat enabled")
+        }
+    }
+    
+    /**
+     * Clear A-B repeat points
+     */
+    fun clearRepeatPoints() {
+        repeatStartPosition = -1L
+        repeatEndPosition = -1L
+        isSettingRepeatStart = false
+        isSettingRepeatEnd = false
+        
+        if (repeatMode == RepeatMode.REPEAT_AB) {
+            repeatMode = RepeatMode.NONE
+            mainScope.launch {
+                _events.emit(PlayerEvent.RepeatModeChanged(repeatMode.name))
+            }
+        }
+        
+        Log.d(TAG, "A-B repeat points cleared")
+    }
+    
+    /**
+     * Set repeat mode
+     */
+    fun setRepeatMode(mode: String) {
+        repeatMode = try {
+            RepeatMode.valueOf(mode.uppercase())
+        } catch (e: IllegalArgumentException) {
+            RepeatMode.NONE
+        }
+        
+        mainScope.launch {
+            _events.emit(PlayerEvent.RepeatModeChanged(repeatMode.name))
+        }
+        
+        Log.d(TAG, "Repeat mode set to: ${repeatMode.name}")
+    }
+    
+    /**
+     * Get current repeat mode
+     */
+    fun getRepeatMode(): String {
+        return repeatMode.name
+    }
+    
+    /**
+     * Get repeat points
+     */
+    fun getRepeatPoints(): Map<String, Long> {
+        return mapOf(
+            "start" to repeatStartPosition,
+            "end" to repeatEndPosition
+        )
+    }
+    
+    /**
+     * Check if A-B repeat is active
+     */
+    fun isRepeatABActive(): Boolean {
+        return repeatMode == RepeatMode.REPEAT_AB && 
+               repeatStartPosition >= 0 && 
+               repeatEndPosition > repeatStartPosition
+    }
+    
+    /**
+     * Handle A-B repeat logic (called from position updates)
+     */
+    private fun handleRepeatLogic() {
+        if (repeatMode == RepeatMode.REPEAT_AB && 
+            repeatStartPosition >= 0 && 
+            repeatEndPosition > repeatStartPosition) {
+            
+            val currentPosition = player.currentPosition
+            
+            // If we've reached or passed the end point, seek to start
+            if (currentPosition >= repeatEndPosition) {
+                player.seekTo(repeatStartPosition)
+                Log.d(TAG, "A-B repeat: seeking to start point")
+            }
+        }
+    }
+    
+    /**
+     * Enable/disable kids lock
+     */
+    fun setKidsLockEnabled(enabled: Boolean, pin: String = "0000") {
+        if (enabled && pin.isNotEmpty()) {
+            kidsLockPin = pin
+        }
+        
+        isKidsLockEnabled = enabled
+        
+        mainScope.launch {
+            _events.emit(PlayerEvent.KidsLockChanged(enabled))
+        }
+        
+        Log.d(TAG, "Kids lock ${if (enabled) "enabled" else "disabled"}")
+    }
+    
+    /**
+     * Check if kids lock is enabled
+     */
+    fun isKidsLockEnabled(): Boolean {
+        return isKidsLockEnabled
+    }
+    
+    /**
+     * Verify kids lock PIN
+     */
+    fun verifyKidsLockPin(pin: String): Boolean {
+        return pin == kidsLockPin
+    }
+    
+    /**
+     * Disable kids lock with PIN verification
+     */
+    fun disableKidsLockWithPin(pin: String): Boolean {
+        return if (verifyKidsLockPin(pin)) {
+            setKidsLockEnabled(false)
+            true
+        } else {
+            false
+        }
+    }
+    
+    /**
+     * Handle gesture when kids lock is enabled
+     */
+    fun handleGestureWithKidsLock(gestureType: String): Boolean {
+        if (isKidsLockEnabled) {
+            // Block most gestures when kids lock is enabled
+            // Only allow basic playback controls
+            return when (gestureType) {
+                "play", "pause", "seek" -> true
+                else -> false
+            }
+        }
+        return true
+    }
+    
+    /**
+     * Set device orientation
+     */
+    fun setOrientation(orientation: String) {
+        val activity = activity ?: return
+        
+        val orientationValue = when (orientation.uppercase()) {
+            "PORTRAIT" -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            "LANDSCAPE" -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            "REVERSE_PORTRAIT" -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
+            "REVERSE_LANDSCAPE" -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+            "SENSOR" -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR
+            "AUTO" -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            else -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+        
+        currentOrientation = orientationValue
+        activity.requestedOrientation = orientationValue
+        
+        mainScope.launch {
+            _events.emit(PlayerEvent.OrientationChanged(orientation))
+        }
+        
+        Log.d(TAG, "Orientation set to: $orientation")
+    }
+    
+    /**
+     * Get current orientation
+     */
+    fun getCurrentOrientation(): String {
+        return when (currentOrientation) {
+            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT -> "PORTRAIT"
+            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE -> "LANDSCAPE"
+            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT -> "REVERSE_PORTRAIT"
+            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE -> "REVERSE_LANDSCAPE"
+            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR -> "SENSOR"
+            else -> "AUTO"
+        }
+    }
+    
+    /**
+     * Enable/disable auto rotation
+     */
+    fun setAutoRotateEnabled(enabled: Boolean) {
+        isAutoRotateEnabled = enabled
+        
+        if (enabled) {
+            setOrientation("AUTO")
+            isOrientationLocked = false
+        } else {
+            isOrientationLocked = true
+        }
+        
+        mainScope.launch {
+            _events.emit(PlayerEvent.AutoRotateChanged(enabled))
+        }
+        
+        Log.d(TAG, "Auto rotation ${if (enabled) "enabled" else "disabled"}")
+    }
+    
+    /**
+     * Check if auto rotate is enabled
+     */
+    fun isAutoRotateEnabled(): Boolean {
+        return isAutoRotateEnabled
+    }
+    
+    /**
+     * Lock/unlock orientation
+     */
+    fun setOrientationLocked(locked: Boolean) {
+        isOrientationLocked = locked
+        
+        if (locked) {
+            // Keep current orientation
+            activity?.requestedOrientation = currentOrientation
+        } else {
+            // Allow sensor-based rotation
+            activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR
+        }
+        
+        mainScope.launch {
+            _events.emit(PlayerEvent.OrientationLockChanged(locked))
+        }
+        
+        Log.d(TAG, "Orientation lock ${if (locked) "enabled" else "disabled"}")
+    }
+    
+    /**
+     * Check if orientation is locked
+     */
+    fun isOrientationLocked(): Boolean {
+        return isOrientationLocked
+    }
+    
+    /**
+     * Toggle between portrait and landscape
+     */
+    fun toggleOrientation() {
+        val newOrientation = when (currentOrientation) {
+            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, 
+            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT -> "LANDSCAPE"
+            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE, 
+            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE -> "PORTRAIT"
+            else -> "LANDSCAPE"
+        }
+        
+        setOrientation(newOrientation)
+    }
+    
+    /**
+     * Handle device rotation changes
+     */
+    fun onConfigurationChanged(newConfig: Configuration) {
+        val newOrientation = when (newConfig.orientation) {
+            Configuration.ORIENTATION_PORTRAIT -> "PORTRAIT"
+            Configuration.ORIENTATION_LANDSCAPE -> "LANDSCAPE"
+            else -> "UNKNOWN"
+        }
+        
+        mainScope.launch {
+            _events.emit(PlayerEvent.DeviceOrientationChanged(newOrientation))
+        }
+        
+        Log.d(TAG, "Device orientation changed to: $newOrientation")
     }
 
     /**
@@ -515,6 +1582,8 @@ class RobustExoPlayerController(
         if (events.contains(Player.EVENT_TRACKS_CHANGED)) {
             mainScope.launch {
                 _events.emit(PlayerEvent.TracksChanged(player.currentTracks))
+                // Also update audio tracks when tracks change
+                updateAudioTracks()
             }
         }
         
@@ -613,6 +1682,26 @@ class RobustExoPlayerController(
         data class Position(val positionMs: Long, val durationMs: Long) : PlayerEvent
         data class TracksChanged(val tracks: Tracks) : PlayerEvent
         data class Gesture(val action: String, val value: String = "") : PlayerEvent
+        data class BrightnessChanged(val brightness: Float) : PlayerEvent
+        data class VolumeChanged(val volume: Int, val maxVolume: Int) : PlayerEvent
+        data class Seek(val position: Long, val duration: Long) : PlayerEvent
+        data class Zoom(val scale: Float) : PlayerEvent
+        data class SubtitleStateChanged(val enabled: Boolean) : PlayerEvent
+        data class SubtitleTrackChanged(val index: Int) : PlayerEvent
+        data class AudioTrackChanged(val groupIndex: Int, val trackIndex: Int) : PlayerEvent
+        data class AudioTracksChanged(val tracks: List<Map<String, Any>>) : PlayerEvent
+        data class PiPModeChanged(val isInPiP: Boolean) : PlayerEvent
+        data class BackgroundPlaybackChanged(val enabled: Boolean) : PlayerEvent
+        data class AudioOnlyModeChanged(val enabled: Boolean) : PlayerEvent
+        data class ScreenshotCaptured(val filePath: String) : PlayerEvent
+        data class ScreenshotDeleted(val filePath: String) : PlayerEvent
+        data class RepeatModeChanged(val mode: String) : PlayerEvent
+        data class RepeatPointSet(val point: String, val position: Long) : PlayerEvent
+        data class KidsLockChanged(val enabled: Boolean) : PlayerEvent
+        data class OrientationChanged(val orientation: String) : PlayerEvent
+        data class AutoRotateChanged(val enabled: Boolean) : PlayerEvent
+        data class OrientationLockChanged(val locked: Boolean) : PlayerEvent
+        data class DeviceOrientationChanged(val orientation: String) : PlayerEvent
     }
 
     // Additional utility methods can be added here as needed

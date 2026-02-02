@@ -41,6 +41,10 @@ class _RobustVideoPlayerWidgetState
   bool _isLocked = false;
   bool _isBuffering = false;
   bool _isAudioOnly = false;
+  String _currentOrientation = 'AUTO';
+  bool _autoRotateEnabled = true;
+  bool _orientationLocked = false;
+  bool _isControllerAttached = false;
 
   String? _errorMessage;
 
@@ -77,6 +81,16 @@ class _RobustVideoPlayerWidgetState
       if (!mounted) return;
       _onSettingsChanged(previous, next);
     });
+  }
+
+  Future<void> _toggleOrientationLockSetting() async {
+    final next = !_orientationLocked;
+    await _robustController.setOrientationLocked(next);
+    await _robustController.setAutoRotateEnabled(!next);
+  }
+
+  Future<void> _toggleOrientation() async {
+    await _robustController.toggleOrientation();
   }
 
   @override
@@ -159,6 +173,21 @@ class _RobustVideoPlayerWidgetState
     _updateOrientationPreference(settings.autoRotate);
   }
 
+  Future<void> _refreshOrientationState() async {
+    final results = await Future.wait([
+      _robustController.getCurrentOrientation(),
+      _robustController.isAutoRotateEnabled(),
+      _robustController.isOrientationLocked(),
+    ]);
+
+    if (!mounted) return;
+    setState(() {
+      _currentOrientation = results[0] as String? ?? 'AUTO';
+      _autoRotateEnabled = results[1] as bool? ?? true;
+      _orientationLocked = results[2] as bool? ?? false;
+    });
+  }
+
   void _updateOrientationPreference(bool autoRotate) {
     final orientations = autoRotate
         ? DeviceOrientation.values
@@ -193,6 +222,22 @@ class _RobustVideoPlayerWidgetState
         _position = event.position;
         _duration = event.duration;
       });
+    } else if (event is RobustOrientationChangedEvent) {
+      setState(() {
+        _currentOrientation = event.orientation;
+      });
+    } else if (event is RobustAutoRotateChangedEvent) {
+      setState(() {
+        _autoRotateEnabled = event.enabled;
+      });
+    } else if (event is RobustOrientationLockChangedEvent) {
+      setState(() {
+        _orientationLocked = event.locked;
+      });
+    } else if (event is RobustDeviceOrientationChangedEvent) {
+      setState(() {
+        _currentOrientation = event.orientation;
+      });
     } else if (event is RobustErrorEvent) {
       setState(() {
         _hasError = true;
@@ -204,6 +249,7 @@ class _RobustVideoPlayerWidgetState
 
   Future<void> _onPlatformViewCreated(int viewId) async {
     _robustController.attach(viewId);
+    _isControllerAttached = true;
     try {
       await _robustController.setSource(widget.videoPath);
 
@@ -225,6 +271,7 @@ class _RobustVideoPlayerWidgetState
       _startProgressSaveTimer();
       _configureSleepTimer(_settings);
       _restartHideControlsTimer();
+      await _refreshOrientationState();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -553,15 +600,72 @@ class _RobustVideoPlayerWidgetState
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: Text(
-                _videoTitle,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 16,
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _videoTitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  AnimatedOpacity(
+                    opacity: _isControllerAttached ? 1 : 0,
+                    duration: const Duration(milliseconds: 200),
+                    child: Text(
+                      _autoRotateEnabled
+                          ? 'Auto rotate · $_currentOrientation'
+                          : _orientationLocked
+                          ? 'Locked · $_currentOrientation'
+                          : 'Fixed · $_currentOrientation',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: 'Rotate screen',
+              onPressed: _isControllerAttached && !_orientationLocked
+                  ? () async {
+                      await _toggleOrientation();
+                      await _refreshOrientationState();
+                      _restartHideControlsTimer();
+                    }
+                  : null,
+              icon: Icon(
+                Icons.screen_rotation,
+                color: _orientationLocked ? Colors.white24 : Colors.white,
+              ),
+            ),
+            IconButton(
+              tooltip: _orientationLocked
+                  ? 'Unlock orientation'
+                  : 'Lock current orientation',
+              onPressed: _isControllerAttached
+                  ? () async {
+                      await _toggleOrientationLockSetting();
+                      await _refreshOrientationState();
+                      _restartHideControlsTimer();
+                    }
+                  : null,
+              icon: Icon(
+                _orientationLocked
+                    ? Icons.screen_lock_rotation
+                    : Icons.screen_rotation_alt,
+                color: Colors.white,
               ),
             ),
             IconButton(

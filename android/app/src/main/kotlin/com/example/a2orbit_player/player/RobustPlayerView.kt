@@ -1,19 +1,20 @@
 package com.example.a2orbit_player.player
 
 import android.content.Context
-import android.graphics.Color
+import android.graphics.PointF
 import android.util.AttributeSet
 import android.view.GestureDetector
 import android.view.MotionEvent
+import android.view.ScaleGestureDetector
+import android.view.ScaleGestureDetector.SimpleOnScaleGestureListener
 import android.view.View
 import android.widget.FrameLayout
-import android.widget.TextView
-import androidx.core.view.GestureDetectorCompat
-import androidx.media3.ui.AspectRatioFrameLayout
+import android.widget.ImageView
 import androidx.media3.ui.PlayerView
+import kotlin.math.abs
 
 /**
- * Robust PlayerView with proper gesture handling and surface management
+ * Enhanced PlayerView with comprehensive gesture controls
  */
 class RobustPlayerView @JvmOverloads constructor(
     context: Context,
@@ -21,92 +22,141 @@ class RobustPlayerView @JvmOverloads constructor(
     defStyleAttr: Int = 0
 ) : FrameLayout(context, attrs, defStyleAttr) {
 
-    val playerView: PlayerView
-    private val gestureOverlay: TextView
-    private val gestureDetector: GestureDetectorCompat
+    val playerView: PlayerView = PlayerView(context)
+    
     private var gestureListener: GestureListener? = null
-
-    init {
-        // Create ExoPlayer PlayerView
-        playerView = PlayerView(context).apply {
-            layoutParams = LayoutParams(
-                LayoutParams.MATCH_PARENT,
-                LayoutParams.MATCH_PARENT
-            )
-            useController = false
-            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-            setBackgroundColor(Color.BLACK)
+    private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+        override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+            gestureListener?.onSingleTap()
+            return true
         }
-
-        // Create gesture overlay
-        gestureOverlay = TextView(context).apply {
-            layoutParams = LayoutParams(
-                LayoutParams.WRAP_CONTENT,
-                LayoutParams.WRAP_CONTENT
-            ).apply {
-                gravity = android.view.Gravity.CENTER
-            }
-            setTextColor(Color.WHITE)
-            textSize = 16f
-            setShadowLayer(2f, 1f, 1f, Color.BLACK)
+        
+        override fun onDoubleTap(e: MotionEvent): Boolean {
+            val isRightHalf = e.x > width / 2
+            gestureListener?.onDoubleTap(isRightHalf)
+            return true
+        }
+        
+        override fun onLongPress(e: MotionEvent) {
+            gestureListener?.onLongPress()
+        }
+    })
+    private val scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+        override fun onScale(detector: ScaleGestureDetector): Boolean {
+            val scaleFactor = detector.scaleFactor
+            currentScale *= scaleFactor
+            
+            // Clamp scale to bounds
+            currentScale = currentScale.coerceIn(minScale, maxScale)
+            
+            // Apply scale to player view
+            playerView.scaleX = currentScale
+            playerView.scaleY = currentScale
+            
+            gestureListener?.onPinchZoom(currentScale)
+            return true
+        }
+        
+        override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
+            return true
+        }
+        
+        override fun onScaleEnd(detector: ScaleGestureDetector) {
+            gestureListener?.onGestureEnd()
+        }
+    })
+    
+    // Gesture state
+    private var isGesturing = false
+    private var initialTouchX = 0f
+    private var initialTouchY = 0f
+    private var lastTouchX = 0f
+    private var lastTouchY = 0f
+    private var isHorizontalGesture = false
+    private var isVerticalGesture = false
+    
+    // Zoom state
+    private var currentScale = 1f
+    private var maxScale = 3f
+    private var minScale = 1f
+    
+    // Overlay views for visual feedback
+    private val brightnessOverlay: ImageView
+    private val volumeOverlay: ImageView
+    private val seekOverlay: ImageView
+    
+    init {
+        addView(playerView, LayoutParams(
+            LayoutParams.MATCH_PARENT,
+            LayoutParams.MATCH_PARENT
+        ))
+        
+        // Create overlay views for gesture feedback
+        brightnessOverlay = createOverlayView(android.R.drawable.ic_menu_more)
+        volumeOverlay = createOverlayView(android.R.drawable.ic_media_play)
+        seekOverlay = createOverlayView(android.R.drawable.ic_media_next)
+        
+        addView(brightnessOverlay)
+        addView(volumeOverlay)
+        addView(seekOverlay)
+        
+        hideOverlayViews()
+    }
+    
+    private fun createOverlayView(iconRes: Int): ImageView {
+        return ImageView(context).apply {
+            setImageResource(iconRes)
+            setBackgroundColor(android.graphics.Color.parseColor("#80000000"))
+            setPadding(32, 32, 32, 32)
             visibility = View.GONE
         }
-
-        addView(playerView)
-        addView(gestureOverlay)
-
-        // Initialize gesture detector
-        gestureDetector = GestureDetectorCompat(context, object : GestureDetector.SimpleOnGestureListener() {
-            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-                gestureListener?.onSingleTap()
-                return true
-            }
-
-            override fun onDoubleTap(e: MotionEvent): Boolean {
-                val isRightHalf = e.x > width / 2
-                gestureListener?.onDoubleTap(isRightHalf)
-                return true
-            }
-
-            override fun onDown(e: MotionEvent): Boolean = true
-        })
     }
-
+    
+    private fun hideOverlayViews() {
+        brightnessOverlay.visibility = View.GONE
+        volumeOverlay.visibility = View.GONE
+        seekOverlay.visibility = View.GONE
+    }
+    
     fun setGestureListener(listener: GestureListener) {
-        gestureListener = listener
+        this.gestureListener = listener
     }
-
-    fun showGestureOverlay(text: String) {
-        if (text.isBlank()) {
-            gestureOverlay.visibility = View.GONE
-        } else {
-            gestureOverlay.text = text
-            gestureOverlay.visibility = View.VISIBLE
-        }
-    }
-
+    
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        // Handle scale gestures first
+        scaleDetector.onTouchEvent(event)
+        
+        // Handle other gestures
         gestureDetector.onTouchEvent(event)
         
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
-                // Handle initial touch
-                return true
+                initialTouchX = event.x
+                initialTouchY = event.y
+                lastTouchX = event.x
+                lastTouchY = event.y
+                isGesturing = false
+                isHorizontalGesture = false
+                isVerticalGesture = false
             }
+            
             MotionEvent.ACTION_MOVE -> {
-                // Handle drag gestures
-                val deltaX = if (event.historySize > 0) event.x - event.getHistoricalX(0) else 0f
-                val deltaY = if (event.historySize > 0) event.y - event.getHistoricalY(0) else 0f
-                
-                if (kotlin.math.abs(deltaX) > kotlin.math.abs(deltaY)) {
-                    // Horizontal drag - seek
-                    gestureListener?.onHorizontalScroll(deltaX)
-                } else {
-                    // Vertical drag - brightness/volume
-                    val isLeftHalf = event.x < width / 2
-                    gestureListener?.onVerticalScroll(isLeftHalf, deltaY)
+                if (!isGesturing && !scaleDetector.isInProgress) {
+                    val deltaX = abs(event.x - initialTouchX)
+                    val deltaY = abs(event.y - initialTouchY)
+                    
+                    // Determine gesture direction after minimum movement
+                    if (deltaX > 30 || deltaY > 30) {
+                        isGesturing = true
+                        isHorizontalGesture = deltaX > deltaY
+                        isVerticalGesture = deltaY > deltaX
+                    }
                 }
-                return true
+                
+                if (isGesturing && !scaleDetector.isInProgress) {
+                    handleGestureMove(event)
+                    return true
+                }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 gestureListener?.onGestureEnd()
@@ -116,12 +166,46 @@ class RobustPlayerView @JvmOverloads constructor(
         
         return super.onTouchEvent(event)
     }
+    
+    private fun handleGestureMove(event: MotionEvent) {
+        val deltaX = event.x - lastTouchX
+        val deltaY = event.y - lastTouchY
+        
+        if (isHorizontalGesture) {
+            // Horizontal swipe - seek
+            val seekDelta = deltaX * 2 // Adjust sensitivity
+            gestureListener?.onHorizontalScroll(seekDelta)
+            
+            // Show seek overlay
+            seekOverlay.visibility = View.VISIBLE
+            seekOverlay.x = event.x - seekOverlay.width / 2
+            seekOverlay.y = event.y - seekOverlay.height / 2
+            
+        } else if (isVerticalGesture) {
+            // Vertical swipe - brightness or volume
+            val isLeftHalf = event.x < width / 2
+            val scrollDelta = -deltaY // Invert for natural scrolling
+            
+            gestureListener?.onVerticalScroll(isLeftHalf, scrollDelta)
+            
+            // Show appropriate overlay
+            val overlay = if (isLeftHalf) brightnessOverlay else volumeOverlay
+            overlay.visibility = View.VISIBLE
+            overlay.x = event.x - overlay.width / 2
+            overlay.y = event.y - overlay.height / 2
+        }
+        
+        lastTouchX = event.x
+        lastTouchY = event.y
+    }
 
     interface GestureListener {
         fun onSingleTap()
         fun onDoubleTap(isRightHalf: Boolean)
+        fun onLongPress()
         fun onVerticalScroll(isLeftHalf: Boolean, delta: Float)
         fun onHorizontalScroll(delta: Float)
+        fun onPinchZoom(scale: Float)
         fun onGestureEnd()
     }
 }
