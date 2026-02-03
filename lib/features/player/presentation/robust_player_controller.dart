@@ -83,6 +83,41 @@ class RobustPlayerController {
   Future<void> setGesturesEnabled(bool enabled) async =>
       _invoke<void>('enableGestures', {'enabled': enabled});
 
+  Future<double?> prepareBrightnessGesture() async =>
+      _invoke<double>('prepareBrightnessGesture');
+
+  Future<double?> applyBrightnessLevel(double level) async =>
+      _invoke<double>('applyBrightnessLevel', {'level': level});
+
+  Future<double?> finalizeBrightnessGesture(double? level) async =>
+      _invoke<double>('finalizeBrightnessGesture', {'level': level});
+
+  Future<Map<String, dynamic>?> prepareVolumeGesture() async {
+    final result = await _invoke<Map<dynamic, dynamic>>('prepareVolumeGesture');
+    return result?.cast<String, dynamic>();
+  }
+
+  Future<Map<String, dynamic>?> applyVolumeLevel(double level) async {
+    final result = await _invoke<Map<dynamic, dynamic>>('applyVolumeLevel', {
+      'level': level,
+    });
+    return result?.cast<String, dynamic>();
+  }
+
+  Future<Map<String, dynamic>?> finalizeVolumeGesture(double? level) async {
+    final result = await _invoke<Map<dynamic, dynamic>>(
+      'finalizeVolumeGesture',
+      {'level': level},
+    );
+    return result?.cast<String, dynamic>();
+  }
+
+  Future<void> handleSeekGesture(double delta) async =>
+      _invoke<void>('handleSeekGesture', {'delta': delta});
+
+  Future<void> resetGestureStates() async =>
+      _invoke<void>('resetGestureStates');
+
   Future<Map<String, dynamic>?> getVideoInformation() async {
     final result = await _invoke<Map<dynamic, dynamic>>('getVideoInformation');
     return result?.cast<String, dynamic>();

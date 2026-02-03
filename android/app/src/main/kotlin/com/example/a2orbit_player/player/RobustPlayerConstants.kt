@@ -39,6 +39,14 @@ object RobustPlayerConstants {
         const val SET_ORIENTATION_LOCKED = "setOrientationLocked"
         const val IS_ORIENTATION_LOCKED = "isOrientationLocked"
         const val TOGGLE_ORIENTATION = "toggleOrientation"
+        const val PREPARE_BRIGHTNESS_GESTURE = "prepareBrightnessGesture"
+        const val APPLY_BRIGHTNESS_LEVEL = "applyBrightnessLevel"
+        const val FINALIZE_BRIGHTNESS_GESTURE = "finalizeBrightnessGesture"
+        const val PREPARE_VOLUME_GESTURE = "prepareVolumeGesture"
+        const val APPLY_VOLUME_LEVEL = "applyVolumeLevel"
+        const val FINALIZE_VOLUME_GESTURE = "finalizeVolumeGesture"
+        const val HANDLE_SEEK_GESTURE = "handleSeekGesture"
+        const val RESET_GESTURE_STATES = "resetGestureStates"
     }
     
     // Error codes

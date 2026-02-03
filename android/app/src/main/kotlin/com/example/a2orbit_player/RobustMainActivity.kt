@@ -228,6 +228,83 @@ class RobustMainActivity : FlutterActivity() {
                     manager.setGesturesEnabled(viewId, enabled)
                     result.success(null)
                 }
+
+                RobustPlayerConstants.Methods.PREPARE_BRIGHTNESS_GESTURE -> {
+                    if (viewId == null) {
+                        result.error("invalid_args", "viewId required", null)
+                        return
+                    }
+                    val brightness = manager.prepareBrightnessGesture(viewId)
+                    result.success(brightness)
+                }
+
+                RobustPlayerConstants.Methods.APPLY_BRIGHTNESS_LEVEL -> {
+                    val level = call.argument<Number>("level")?.toFloat()
+                    if (viewId == null || level == null) {
+                        result.error("invalid_args", "viewId and level required", null)
+                        return
+                    }
+                    val applied = manager.applyBrightnessLevel(viewId, level)
+                    result.success(applied)
+                }
+
+                RobustPlayerConstants.Methods.FINALIZE_BRIGHTNESS_GESTURE -> {
+                    val finalLevel = call.argument<Number>("level")?.toFloat()
+                    if (viewId == null) {
+                        result.error("invalid_args", "viewId required", null)
+                        return
+                    }
+                    val committed = manager.finalizeBrightnessGesture(viewId, finalLevel)
+                    result.success(committed)
+                }
+
+                RobustPlayerConstants.Methods.PREPARE_VOLUME_GESTURE -> {
+                    if (viewId == null) {
+                        result.error("invalid_args", "viewId required", null)
+                        return
+                    }
+                    val info = manager.prepareVolumeGesture(viewId)
+                    result.success(info)
+                }
+
+                RobustPlayerConstants.Methods.APPLY_VOLUME_LEVEL -> {
+                    val level = call.argument<Number>("level")?.toFloat()
+                    if (viewId == null || level == null) {
+                        result.error("invalid_args", "viewId and level required", null)
+                        return
+                    }
+                    val applied = manager.applyVolumeLevel(viewId, level)
+                    result.success(applied)
+                }
+
+                RobustPlayerConstants.Methods.FINALIZE_VOLUME_GESTURE -> {
+                    val level = call.argument<Number>("level")?.toFloat()
+                    if (viewId == null) {
+                        result.error("invalid_args", "viewId required", null)
+                        return
+                    }
+                    val committed = manager.finalizeVolumeGesture(viewId, level)
+                    result.success(committed)
+                }
+
+                RobustPlayerConstants.Methods.HANDLE_SEEK_GESTURE -> {
+                    val delta = call.argument<Number>("delta")?.toFloat()
+                    if (viewId == null || delta == null) {
+                        result.error("invalid_args", "viewId and delta required", null)
+                        return
+                    }
+                    manager.handleSeekGesture(viewId, delta)
+                    result.success(null)
+                }
+
+                RobustPlayerConstants.Methods.RESET_GESTURE_STATES -> {
+                    if (viewId == null) {
+                        result.error("invalid_args", "viewId required", null)
+                        return
+                    }
+                    manager.resetGestureStates(viewId)
+                    result.success(null)
+                }
                 
                 RobustPlayerConstants.Methods.DISPOSE -> {
                     if (viewId != null) {

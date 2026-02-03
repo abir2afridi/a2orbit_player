@@ -298,14 +298,30 @@ class RobustPlayerManager(
         Log.d(TAG, "Gestures ${if (enabled) "enabled" else "disabled"} for viewId: $viewId")
     }
     
-    fun handleBrightnessGesture(viewId: Int, delta: Float) {
-        getController(viewId)?.handleBrightnessGesture(delta)
+    fun prepareBrightnessGesture(viewId: Int): Double? {
+        return getController(viewId)?.prepareBrightnessGesture()?.toDouble()
     }
-    
-    fun handleVolumeGesture(viewId: Int, delta: Float) {
-        getController(viewId)?.handleVolumeGesture(delta)
+
+    fun applyBrightnessLevel(viewId: Int, level: Float): Double? {
+        return getController(viewId)?.applyBrightnessLevel(level)?.toDouble()
     }
-    
+
+    fun finalizeBrightnessGesture(viewId: Int, level: Float?): Double? {
+        return getController(viewId)?.finalizeBrightnessGesture(level)?.toDouble()
+    }
+
+    fun prepareVolumeGesture(viewId: Int): Map<String, Int>? {
+        return getController(viewId)?.prepareVolumeGesture()
+    }
+
+    fun applyVolumeLevel(viewId: Int, level: Float): Map<String, Int>? {
+        return getController(viewId)?.applyVolumeLevel(level)
+    }
+
+    fun finalizeVolumeGesture(viewId: Int, level: Float?): Map<String, Int>? {
+        return getController(viewId)?.finalizeVolumeGesture(level)
+    }
+
     fun handleSeekGesture(viewId: Int, delta: Float) {
         getController(viewId)?.handleSeekGesture(delta)
     }

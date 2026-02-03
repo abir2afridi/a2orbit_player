@@ -46,14 +46,21 @@ class _RobustVideoPlayerWidgetState
   bool _orientationLocked = false;
   bool _isControllerAttached = false;
   final GlobalKey _topBarKey = GlobalKey();
-  final GlobalKey _centerControlsKey = GlobalKey();
   final GlobalKey _bottomBarKey = GlobalKey();
+  final GlobalKey _gestureOverlayKey = GlobalKey();
 
   String? _errorMessage;
 
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   Duration? _resumePosition;
+
+  double _brightnessPercent = 0.5;
+  double _volumePercent = 0.5;
+  Duration? _seekPreviewDelta;
+  bool _showGestureOverlay = false;
+  String? _activeGesture;
+  Timer? _gestureOverlayTimer;
 
   bool _isPlaying = false;
 
@@ -86,6 +93,165 @@ class _RobustVideoPlayerWidgetState
     });
   }
 
+  void _handleVerticalGesture(DragUpdateDetails details) {
+    if (_isLocked) return;
+    final settings = _settings;
+    if (settings == null) return;
+
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isLeftSide = details.localPosition.dx < screenWidth / 2;
+    final deltaPixels = -details.primaryDelta!;
+
+    if (isLeftSide && settings.enableGestureBrightness) {
+      _updateBrightness(deltaPixels);
+    } else if (!isLeftSide && settings.enableGestureVolume) {
+      _updateVolume(deltaPixels);
+    }
+  }
+
+  void _handleHorizontalGesture(DragUpdateDetails details) {
+    if (_isLocked) return;
+    final settings = _settings;
+    if (settings == null || !settings.enableGestureSeek) return;
+
+    _updateSeek(details.primaryDelta!);
+  }
+
+  void _prepareBrightnessGesture() {
+    unawaited(() async {
+      final initial = await _robustController.prepareBrightnessGesture();
+      if (!mounted || initial == null) return;
+      setState(() {
+        _brightnessPercent = initial.clamp(0.0, 1.0);
+        _activeGesture = 'brightness';
+      });
+    }());
+  }
+
+  void _prepareVolumeGesture() {
+    unawaited(() async {
+      final info = await _robustController.prepareVolumeGesture();
+      if (!mounted || info == null) return;
+      final current = (info['current'] as num?)?.toDouble() ?? 0.0;
+      final max = (info['max'] as num?)?.toDouble() ?? 0.0;
+      final percent = max > 0 ? (current / max).clamp(0.0, 1.0) : 0.0;
+      setState(() {
+        _volumePercent = percent;
+        _activeGesture = 'volume';
+      });
+    }());
+  }
+
+  void _prepareVerticalGesture(DragStartDetails details) {
+    if (_isLocked) return;
+    final settings = _settings;
+    if (settings == null) return;
+
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isLeftSide = details.localPosition.dx < screenWidth / 2;
+
+    if (isLeftSide && settings.enableGestureBrightness) {
+      _prepareBrightnessGesture();
+    } else if (!isLeftSide && settings.enableGestureVolume) {
+      _prepareVolumeGesture();
+    }
+  }
+
+  void _updateBrightness(double deltaPixels) {
+    final deltaPercent = deltaPixels / 300;
+    final next = (_brightnessPercent + deltaPercent).clamp(0.0, 1.0);
+    setState(() {
+      _brightnessPercent = next;
+      _activeGesture = 'brightness';
+    });
+    unawaited(_robustController.applyBrightnessLevel(next));
+    _showGestureFeedback();
+  }
+
+  void _updateVolume(double deltaPixels) {
+    final deltaPercent = deltaPixels / 300;
+    final next = (_volumePercent + deltaPercent).clamp(0.0, 1.0);
+    setState(() {
+      _volumePercent = next;
+      _activeGesture = 'volume';
+    });
+    unawaited(_robustController.applyVolumeLevel(next));
+    _showGestureFeedback();
+  }
+
+  void _updateSeek(double deltaPixels) {
+    if (_duration <= Duration.zero) return;
+    final width = MediaQuery.of(context).size.width;
+    if (width <= 0) return;
+
+    final fraction = deltaPixels / width;
+    final deltaMs = (fraction * _duration.inMilliseconds).round();
+    var cumulative =
+        (_seekPreviewDelta ?? Duration.zero) + Duration(milliseconds: deltaMs);
+
+    final current = _position;
+    final total = _duration;
+    final target = current + cumulative;
+    if (target < Duration.zero) {
+      cumulative = -current;
+    } else if (total > Duration.zero && target > total) {
+      cumulative = total - current;
+    }
+
+    setState(() {
+      _activeGesture = 'seek';
+      _seekPreviewDelta = cumulative;
+    });
+    _showGestureFeedback();
+  }
+
+  void _showGestureFeedback() {
+    _gestureOverlayTimer?.cancel();
+    setState(() {
+      _showGestureOverlay = true;
+    });
+
+    _gestureOverlayTimer = Timer(const Duration(milliseconds: 800), () {
+      if (!mounted) return;
+      setState(() {
+        _showGestureOverlay = false;
+        _seekPreviewDelta = null;
+        _activeGesture = null;
+      });
+    });
+  }
+
+  void _handleGestureEnd() {
+    _gestureOverlayTimer?.cancel();
+
+    final gesture = _activeGesture;
+    final shouldSeek = gesture == 'seek';
+    final seekDelta = _seekPreviewDelta;
+
+    if (gesture == 'brightness') {
+      final value = _brightnessPercent.clamp(0.0, 1.0);
+      unawaited(_robustController.finalizeBrightnessGesture(value));
+    } else if (gesture == 'volume') {
+      final value = _volumePercent.clamp(0.0, 1.0);
+      unawaited(_robustController.finalizeVolumeGesture(value));
+    }
+
+    unawaited(_robustController.resetGestureStates());
+
+    if (shouldSeek && seekDelta != null && seekDelta != Duration.zero) {
+      _seekRelative(seekDelta);
+    }
+
+    _gestureOverlayTimer = Timer(const Duration(milliseconds: 500), () {
+      if (!mounted) return;
+      setState(() {
+        _showGestureOverlay = false;
+        _seekPreviewDelta = null;
+        _activeGesture = null;
+      });
+    });
+  }
+
   Future<void> _toggleOrientationLockSetting() async {
     final next = !_orientationLocked;
     await _robustController.setOrientationLocked(next);
@@ -102,6 +268,7 @@ class _RobustVideoPlayerWidgetState
     _hideControlsTimer?.cancel();
     _progressSaveTimer?.cancel();
     _sleepTimer?.cancel();
+    _gestureOverlayTimer?.cancel();
     _eventSubscription?.cancel();
     _settingsSubscription?.close();
     _robustController.dispose();
@@ -232,8 +399,29 @@ class _RobustVideoPlayerWidgetState
     } else if (event is RobustGestureEvent) {
       if (event.action == 'single_tap') {
         _toggleControls();
-      } else if (event.action == 'gesture_end' && _showControls && !_isLocked) {
-        _restartHideControlsTimer();
+      } else if (event.action == 'gesture_end') {
+        if (_showControls && !_isLocked) {
+          _restartHideControlsTimer();
+        }
+        _handleGestureEnd();
+      }
+    } else if (event is RobustBrightnessChangedEvent) {
+      final brightness = event.brightness.clamp(0.0, 1.0);
+      setState(() {
+        _brightnessPercent = brightness;
+      });
+      if (_activeGesture == 'brightness') {
+        _showGestureFeedback();
+      }
+    } else if (event is RobustVolumeChangedEvent) {
+      final percent = event.maxVolume > 0
+          ? (event.volume / event.maxVolume).clamp(0.0, 1.0)
+          : 0.0;
+      setState(() {
+        _volumePercent = percent;
+      });
+      if (_activeGesture == 'volume') {
+        _showGestureFeedback();
       }
     } else if (event is RobustAutoRotateChangedEvent) {
       setState(() {
@@ -369,8 +557,8 @@ class _RobustVideoPlayerWidgetState
     if (!_showControls) return false;
     final contexts = <BuildContext?>[
       _topBarKey.currentContext,
-      _centerControlsKey.currentContext,
       _bottomBarKey.currentContext,
+      _gestureOverlayKey.currentContext,
     ];
 
     for (final context in contexts) {
@@ -444,6 +632,16 @@ class _RobustVideoPlayerWidgetState
     if (settings == null) return;
     final jump = Duration(milliseconds: settings.seekDuration);
     _seekRelative(isLeft ? -jump : jump);
+  }
+
+  Duration _clampPosition(Duration value) {
+    if (value < Duration.zero) {
+      return Duration.zero;
+    }
+    if (_duration > Duration.zero && value > _duration) {
+      return _duration;
+    }
+    return value;
   }
 
   Future<void> _showSpeedSheet() async {
@@ -583,6 +781,7 @@ class _RobustVideoPlayerWidgetState
       if (_isLocked) {
         overlayChildren.add(_buildLockIndicator());
       }
+      overlayChildren.add(_buildGestureOverlay());
     }
 
     return Stack(
@@ -609,6 +808,26 @@ class _RobustVideoPlayerWidgetState
               final width = MediaQuery.of(context).size.width;
               _handleDoubleTap(details.localPosition.dx, width);
             },
+            onVerticalDragStart: (details) {
+              if (_isLocked) return;
+              _gestureOverlayTimer?.cancel();
+              _prepareVerticalGesture(details);
+            },
+            onVerticalDragUpdate: _handleVerticalGesture,
+            onVerticalDragEnd: (details) {
+              if (_isLocked) return;
+              _handleGestureEnd();
+            },
+            onHorizontalDragStart: (details) {
+              if (_isLocked) return;
+              _gestureOverlayTimer?.cancel();
+              _seekPreviewDelta = Duration.zero;
+            },
+            onHorizontalDragUpdate: _handleHorizontalGesture,
+            onHorizontalDragEnd: (_) {
+              if (_isLocked) return;
+              _handleGestureEnd();
+            },
             child: AbsorbPointer(
               absorbing: _isLocked,
               child: Stack(children: overlayChildren),
@@ -616,6 +835,96 @@ class _RobustVideoPlayerWidgetState
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildGestureOverlay() {
+    if (!_showGestureOverlay) {
+      return const SizedBox.shrink();
+    }
+
+    final gesture = _activeGesture;
+    if (gesture == null) {
+      return const SizedBox.shrink();
+    }
+
+    IconData icon;
+    String label;
+    String? secondary;
+
+    switch (gesture) {
+      case 'brightness':
+        final percent = (_brightnessPercent * 100).clamp(0, 100).round();
+        icon = Icons.brightness_6_outlined;
+        label = '$percent%';
+        break;
+      case 'volume':
+        final percent = (_volumePercent * 100).clamp(0, 100).round();
+        icon = percent <= 0
+            ? Icons.volume_off
+            : percent < 50
+            ? Icons.volume_down
+            : Icons.volume_up;
+        label = '$percent%';
+        break;
+      case 'seek':
+        final delta = _seekPreviewDelta ?? Duration.zero;
+        final seconds = delta.inMilliseconds.abs() / 1000;
+        final formattedSeconds = seconds >= 10
+            ? seconds.toStringAsFixed(0)
+            : seconds.toStringAsFixed(1);
+        icon = delta.isNegative ? Icons.fast_rewind : Icons.fast_forward;
+        label = '${delta.isNegative ? '-' : '+'}$formattedSeconds s';
+
+        final target = _clampPosition(_position + delta);
+        secondary = _formatDuration(target);
+        break;
+      default:
+        return const SizedBox.shrink();
+    }
+
+    final secondaryText = secondary;
+
+    final overlayContent = <Widget>[
+      Icon(icon, color: Colors.white, size: 40),
+      const SizedBox(height: 10),
+      Text(
+        label,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 18,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    ];
+
+    if (secondaryText != null) {
+      overlayContent.addAll([
+        const SizedBox(height: 4),
+        Text(
+          secondaryText,
+          style: const TextStyle(color: Colors.white70, fontSize: 14),
+        ),
+      ]);
+    }
+
+    return Positioned.fill(
+      key: _gestureOverlayKey,
+      child: IgnorePointer(
+        child: Center(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.65),
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: overlayContent,
+            ),
+          ),
+        ),
+      ),
     );
   }
 
