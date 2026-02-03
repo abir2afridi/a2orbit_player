@@ -346,15 +346,15 @@ class RobustPlayerManager(
         return getController(viewId)?.getSubtitleTracks() ?: emptyList()
     }
     
-    fun getAudioTracks(viewId: Int): List<Map<String, Any>> {
+    fun getAudioTracks(viewId: Int): List<Map<String, Any?>> {
         return getController(viewId)?.getAudioTracks() ?: emptyList()
     }
     
-    fun selectAudioTrack(viewId: Int, groupIndex: Int, trackIndex: Int) {
-        getController(viewId)?.selectAudioTrack(groupIndex, trackIndex)
+    fun selectAudioTrack(viewId: Int, groupIndex: Int, trackIndex: Int): Boolean {
+        return getController(viewId)?.selectAudioTrack(groupIndex, trackIndex) ?: false
     }
     
-    fun getCurrentAudioTrack(viewId: Int): Map<String, Any>? {
+    fun getCurrentAudioTrack(viewId: Int): Map<String, Any?>? {
         return getController(viewId)?.getCurrentAudioTrack()
     }
     

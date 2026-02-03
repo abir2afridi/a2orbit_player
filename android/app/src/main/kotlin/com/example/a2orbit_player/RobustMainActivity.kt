@@ -248,6 +248,35 @@ class RobustMainActivity : FlutterActivity() {
                     result.success(info)
                 }
 
+                RobustPlayerConstants.Methods.GET_AUDIO_TRACKS -> {
+                    if (viewId == null) {
+                        result.error("invalid_args", "viewId required", null)
+                        return
+                    }
+                    val tracks = manager.getAudioTracks(viewId)
+                    result.success(tracks)
+                }
+
+                RobustPlayerConstants.Methods.SELECT_AUDIO_TRACK -> {
+                    val groupIndex = call.argument<Number>("groupIndex")?.toInt()
+                    val trackIndex = call.argument<Number>("trackIndex")?.toInt()
+                    if (viewId == null || groupIndex == null || trackIndex == null) {
+                        result.error("invalid_args", "viewId, groupIndex and trackIndex required", null)
+                        return
+                    }
+                    val success = manager.selectAudioTrack(viewId, groupIndex, trackIndex)
+                    result.success(success)
+                }
+
+                RobustPlayerConstants.Methods.GET_CURRENT_AUDIO_TRACK -> {
+                    if (viewId == null) {
+                        result.error("invalid_args", "viewId required", null)
+                        return
+                    }
+                    val track = manager.getCurrentAudioTrack(viewId)
+                    result.success(track)
+                }
+
                 RobustPlayerConstants.Methods.APPLY_VOLUME_LEVEL -> {
                     val level = call.argument<Number>("level")?.toFloat()
                     if (viewId == null || level == null) {

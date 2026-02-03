@@ -78,6 +78,9 @@ class _RobustVideoPlayerWidgetState
 
   AppSettings? _settings;
 
+  List<RobustAudioTrack> _audioTracks = const [];
+  RobustAudioTrack? _selectedAudioTrack;
+
   Timer? _hideControlsTimer;
   Timer? _progressSaveTimer;
   Timer? _sleepTimer;
@@ -392,6 +395,8 @@ class _RobustVideoPlayerWidgetState
     _hasError = false;
     _errorMessage = null;
     _isBuffering = false;
+    _audioTracks = const [];
+    _selectedAudioTrack = null;
     _loadResumePosition();
   }
 
@@ -407,6 +412,53 @@ class _RobustVideoPlayerWidgetState
     _settings = settings;
     _isAudioOnly = settings.audioOnly;
     _updateOrientationPreference(settings.autoRotate);
+  }
+
+  Future<void> _refreshAudioTracks() async {
+    final maps = await _robustController.getAudioTracks();
+    if (!mounted) return;
+    final tracks = maps
+        .map((map) => RobustAudioTrack.fromMap(map))
+        .toList(growable: false);
+    _setAudioTracks(tracks);
+  }
+
+  void _setAudioTracks(List<RobustAudioTrack> tracks) {
+    RobustAudioTrack? selected;
+    if (tracks.isNotEmpty) {
+      selected = tracks.firstWhere(
+        (track) => track.isSelected,
+        orElse: () => tracks.first,
+      );
+    }
+    setState(() {
+      _audioTracks = tracks;
+      _selectedAudioTrack = selected;
+    });
+  }
+
+  void _markSelectedAudioTrack(int groupIndex, int trackIndex) {
+    if (_audioTracks.isEmpty) return;
+    final updated = _audioTracks
+        .map(
+          (track) => track.copyWith(
+            isSelected:
+                track.groupIndex == groupIndex &&
+                track.trackIndex == trackIndex,
+          ),
+        )
+        .toList(growable: false);
+    RobustAudioTrack? selected;
+    if (updated.isNotEmpty) {
+      selected = updated.firstWhere(
+        (track) => track.isSelected,
+        orElse: () => updated.first,
+      );
+    }
+    setState(() {
+      _audioTracks = updated;
+      _selectedAudioTrack = selected;
+    });
   }
 
   Future<void> _refreshOrientationState() async {
@@ -489,6 +541,13 @@ class _RobustVideoPlayerWidgetState
       if (_activeGesture == 'volume') {
         _showGestureFeedback();
       }
+    } else if (event is RobustAudioTracksChangedEvent) {
+      final tracks = event.tracks
+          .map(RobustAudioTrack.fromMap)
+          .toList(growable: false);
+      _setAudioTracks(tracks);
+    } else if (event is RobustAudioTrackChangedEvent) {
+      _markSelectedAudioTrack(event.groupIndex, event.trackIndex);
     } else if (event is RobustAutoRotateChangedEvent) {
       setState(() {
         _autoRotateEnabled = event.enabled;
@@ -536,6 +595,7 @@ class _RobustVideoPlayerWidgetState
       _configureSleepTimer(_settings);
       _restartHideControlsTimer();
       await _refreshOrientationState();
+      unawaited(_refreshAudioTracks());
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -758,6 +818,46 @@ class _RobustVideoPlayerWidgetState
     );
     if (result != null) {
       await _robustController.setAspectRatio(result);
+    }
+  }
+
+  Future<void> _showAudioTrackSheet() async {
+    final tracks = _audioTracks;
+    if (tracks.length <= 1) {
+      return;
+    }
+    final selected = _selectedAudioTrack;
+    final result = await showModalBottomSheet<RobustAudioTrack>(
+      context: context,
+      builder: (context) =>
+          _AudioTrackSheet(tracks: tracks, selected: selected),
+    );
+
+    if (result != null) {
+      final success = await _robustController.selectAudioTrack(
+        result.groupIndex,
+        result.trackIndex,
+      );
+      if (success) {
+        _markSelectedAudioTrack(result.groupIndex, result.trackIndex);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Audio switched to ${result.languageDisplay}'),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      } else {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Audio track not supported'),
+            behavior: SnackBarBehavior.floating,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
     }
   }
 
@@ -1048,7 +1148,7 @@ class _RobustVideoPlayerWidgetState
               ),
             ),
             IconButton(
-              onPressed: () {},
+              onPressed: _audioTracks.length > 1 ? _showAudioTrackSheet : null,
               icon: const Icon(Icons.music_note, color: Colors.white),
             ),
             IconButton(
@@ -1502,6 +1602,42 @@ class _OptionSheet<T> extends StatelessWidget {
               onTap: () => Navigator.of(context).pop(option),
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AudioTrackSheet extends StatelessWidget {
+  const _AudioTrackSheet({required this.tracks, this.selected});
+
+  final List<RobustAudioTrack> tracks;
+  final RobustAudioTrack? selected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.only(top: 16, bottom: 32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            'Audio track',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 12),
+          ...tracks.map((track) {
+            return RadioListTile<RobustAudioTrack>(
+              value: track,
+              groupValue: selected,
+              onChanged: (_) => Navigator.of(context).pop(track),
+              title: Text(track.displayName),
+              subtitle: Text(track.languageDisplay),
+              secondary: track.channelDescription.isNotEmpty
+                  ? Text(track.channelDescription)
+                  : null,
+            );
+          }),
         ],
       ),
     );

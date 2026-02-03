@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class MusicScreen extends StatefulWidget {
   const MusicScreen({super.key});
@@ -30,13 +31,27 @@ class _MusicScreenState extends State<MusicScreen>
       appBar: AppBar(
         backgroundColor: Theme.of(context).colorScheme.surface,
         elevation: 0,
-        title: Text(
-          'Music',
-          style: TextStyle(
-            color: Theme.of(context).colorScheme.onSurface,
-            fontWeight: FontWeight.bold,
-            fontSize: 22,
-          ),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'A2Orbit Player',
+              style: GoogleFonts.raleway(
+                color: Theme.of(context).colorScheme.onSurface,
+                fontWeight: FontWeight.bold,
+                fontSize: 22,
+              ),
+            ),
+            Text(
+              'Music',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                fontWeight: FontWeight.normal,
+                fontSize: 14,
+              ),
+            ),
+          ],
         ),
         actions: [
           IconButton(

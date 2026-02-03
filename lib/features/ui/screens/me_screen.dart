@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../../settings/presentation/settings_screen.dart';
 import 'theme_screen.dart';
 import 'developer_screen.dart';
@@ -8,181 +9,201 @@ class MeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Theme.of(context).colorScheme.primaryContainer.withOpacity(0.35),
-            Theme.of(context).colorScheme.background,
+    return Scaffold(
+      backgroundColor: Theme.of(context).colorScheme.background,
+      appBar: AppBar(
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        elevation: 0,
+        automaticallyImplyLeading: false,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'A2Orbit Player',
+              style: GoogleFonts.raleway(
+                color: Theme.of(context).colorScheme.onSurface,
+                fontWeight: FontWeight.bold,
+                fontSize: 22,
+              ),
+            ),
+            Text(
+              'Me',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                fontWeight: FontWeight.normal,
+                fontSize: 14,
+              ),
+            ),
           ],
-          stops: const [0.0, 0.3],
         ),
       ),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(top: 20, bottom: 20),
-              child: Text(
-                'Me',
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: Theme.of(context).colorScheme.onSurface,
-                ),
-              ),
-            ),
-            // Main Grid Card
-            _buildCard(context, [
-              _buildGrid([
-                _buildGridItem(context, Icons.download_outlined, 'Downloads'),
-                _buildGridItem(
-                  context,
-                  Icons.swap_horizontal_circle_outlined,
-                  'File Transfer',
-                ),
-                _buildGridItem(
-                  context,
-                  Icons.lock_person_outlined,
-                  'Private Folder',
-                ),
-                _buildGridItem(
-                  context,
-                  Icons.playlist_play_outlined,
-                  'Video Playlists',
-                ),
-                _buildGridItem(
-                  context,
-                  Icons.folder_open_outlined,
-                  'Media Manager',
-                ),
-                _buildGridItem(
-                  context,
-                  Icons.computer_outlined,
-                  'Local Network',
-                ),
-                _buildGridItem(
-                  context,
-                  Icons.language_outlined,
-                  'Network Stream',
-                ),
-                _buildGridItem(
-                  context,
-                  Icons.cloud_queue_outlined,
-                  'Cloud Drive',
-                ),
-                _buildGridItem(
-                  context,
-                  Icons.delete_outline_outlined,
-                  'Recycle Bin',
-                ),
-              ]),
-            ]),
-            const SizedBox(height: 16),
-
-            // WhatsApp Status Saver Card
-            _buildCard(context, [
-              _buildListTile(
-                context,
-                Icons.chat,
-                'WhatsApp Status Saver',
-                iconColor: Colors.green,
-                onTap: () {},
-              ),
-            ]),
-            const SizedBox(height: 16),
-
-            // Settings Group Card
-            _buildCard(context, [
-              _buildListTile(
-                context,
-                Icons.checkroom_outlined,
-                'App Theme',
-                onTap: () {
-                  Navigator.push(
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Theme.of(context).colorScheme.primaryContainer.withOpacity(0.35),
+              Theme.of(context).colorScheme.background,
+            ],
+            stops: const [0.0, 0.3],
+          ),
+        ),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 20),
+              // Main Grid Card
+              _buildCard(context, [
+                _buildGrid([
+                  _buildGridItem(context, Icons.download_outlined, 'Downloads'),
+                  _buildGridItem(
                     context,
-                    MaterialPageRoute(
-                      builder: (context) => const ThemeScreen(),
-                    ),
-                  );
-                },
-              ),
-              const Divider(height: 1, indent: 56),
-              _buildListTile(
-                context,
-                Icons.settings_outlined,
-                'Settings',
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const SettingsScreen(),
-                    ),
-                  );
-                },
-              ),
-              const Divider(height: 1, indent: 56),
-              _buildListTile(
-                context,
-                Icons.picture_in_picture_alt_outlined,
-                'Custom Pop-up Play',
-                onTap: () {},
-              ),
-            ]),
-            const SizedBox(height: 16),
-
-            // Legal & Help Group Card
-            _buildCard(context, [
-              _buildListTile(
-                context,
-                Icons.gavel_outlined,
-                'Legal',
-                onTap: () {},
-              ),
-              const Divider(height: 1, indent: 56),
-              _buildListTile(context, Icons.help_outline, 'Help'),
-            ]),
-            const SizedBox(height: 24), // Changed from 16 to 24
-            // Developer Section
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(left: 8, bottom: 8),
-                  child: Text(
-                    'Developer Information',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.onSurface.withOpacity(0.6),
-                    ),
+                    Icons.swap_horizontal_circle_outlined,
+                    'File Transfer',
                   ),
-                ),
-                _buildCard(context, [
-                  _buildListTile(
+                  _buildGridItem(
                     context,
-                    Icons.person_outline,
-                    'About Developer',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const DeveloperScreen(),
-                        ),
-                      );
-                    },
+                    Icons.lock_person_outlined,
+                    'Private Folder',
+                  ),
+                  _buildGridItem(
+                    context,
+                    Icons.playlist_play_outlined,
+                    'Video Playlists',
+                  ),
+                  _buildGridItem(
+                    context,
+                    Icons.folder_open_outlined,
+                    'Media Manager',
+                  ),
+                  _buildGridItem(
+                    context,
+                    Icons.computer_outlined,
+                    'Local Network',
+                  ),
+                  _buildGridItem(
+                    context,
+                    Icons.language_outlined,
+                    'Network Stream',
+                  ),
+                  _buildGridItem(
+                    context,
+                    Icons.cloud_queue_outlined,
+                    'Cloud Drive',
+                  ),
+                  _buildGridItem(
+                    context,
+                    Icons.delete_outline_outlined,
+                    'Recycle Bin',
                   ),
                 ]),
-              ],
-            ),
-            const SizedBox(height: 40),
-          ],
+              ]),
+              const SizedBox(height: 16),
+
+              // WhatsApp Status Saver Card
+              _buildCard(context, [
+                _buildListTile(
+                  context,
+                  Icons.chat,
+                  'WhatsApp Status Saver',
+                  iconColor: Colors.green,
+                  onTap: () {},
+                ),
+              ]),
+              const SizedBox(height: 16),
+
+              // Settings Group Card
+              _buildCard(context, [
+                _buildListTile(
+                  context,
+                  Icons.checkroom_outlined,
+                  'App Theme',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const ThemeScreen(),
+                      ),
+                    );
+                  },
+                ),
+                const Divider(height: 1, indent: 56),
+                _buildListTile(
+                  context,
+                  Icons.settings_outlined,
+                  'Settings',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const SettingsScreen(),
+                      ),
+                    );
+                  },
+                ),
+                const Divider(height: 1, indent: 56),
+                _buildListTile(
+                  context,
+                  Icons.picture_in_picture_alt_outlined,
+                  'Custom Pop-up Play',
+                  onTap: () {},
+                ),
+              ]),
+              const SizedBox(height: 16),
+
+              // Legal & Help Group Card
+              _buildCard(context, [
+                _buildListTile(
+                  context,
+                  Icons.gavel_outlined,
+                  'Legal',
+                  onTap: () {},
+                ),
+                const Divider(height: 1, indent: 56),
+                _buildListTile(context, Icons.help_outline, 'Help'),
+              ]),
+              const SizedBox(height: 24),
+              // Developer Section
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(left: 8, bottom: 8),
+                    child: Text(
+                      'Developer Information',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.onSurface.withOpacity(0.6),
+                      ),
+                    ),
+                  ),
+                  _buildCard(context, [
+                    _buildListTile(
+                      context,
+                      Icons.person_outline,
+                      'About Developer',
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const DeveloperScreen(),
+                          ),
+                        );
+                      },
+                    ),
+                  ]),
+                ],
+              ),
+              const SizedBox(height: 40),
+            ],
+          ),
         ),
       ),
     );

@@ -136,15 +136,18 @@ class RobustPlayerController {
     return result?.cast<Map<String, dynamic>>() ?? [];
   }
 
-  Future<void> selectAudioTrack(int groupIndex, int trackIndex) async =>
-      _invoke<void>('selectAudioTrack', {
-        'groupIndex': groupIndex,
-        'trackIndex': trackIndex,
-      });
+  Future<bool> selectAudioTrack(int groupIndex, int trackIndex) async {
+    final result = await _invoke<bool>('selectAudioTrack', {
+      'groupIndex': groupIndex,
+      'trackIndex': trackIndex,
+    });
+    return result ?? false;
+  }
 
-  Future<Map<String, dynamic>?> getCurrentAudioTrack() async {
+  Future<RobustAudioTrack?> getCurrentAudioTrack() async {
     final result = await _invoke<Map<dynamic, dynamic>>('getCurrentAudioTrack');
-    return result?.cast<String, dynamic>();
+    if (result == null) return null;
+    return RobustAudioTrack.fromMap(result);
   }
 
   Future<void> exitPictureInPicture() async =>
@@ -521,8 +524,15 @@ class RobustAudioTrack {
     required this.groupIndex,
     required this.trackIndex,
     required this.id,
-    required this.language,
-    required this.label,
+    required this.languageCode,
+    required this.languageDisplay,
+    required this.displayName,
+    required this.mimeType,
+    required this.channelCount,
+    required this.channelDescription,
+    this.bitrate,
+    this.sampleRate,
+    this.isSelected = false,
   });
 
   factory RobustAudioTrack.fromMap(Map<dynamic, dynamic> map) =>
@@ -530,15 +540,58 @@ class RobustAudioTrack {
         groupIndex: (map['groupIndex'] as num?)?.toInt() ?? 0,
         trackIndex: (map['trackIndex'] as num?)?.toInt() ?? 0,
         id: map['id']?.toString() ?? '',
-        language: map['language']?.toString() ?? 'Unknown',
-        label: map['label']?.toString() ?? 'Track',
+        languageCode: map['language']?.toString() ?? 'und',
+        languageDisplay: map['languageDisplay']?.toString() ?? 'Unknown',
+        displayName: map['displayName']?.toString() ?? 'Track',
+        mimeType: map['mimeType']?.toString() ?? '',
+        channelCount: (map['channelCount'] as num?)?.toInt() ?? 0,
+        channelDescription: map['channelDescription']?.toString() ?? '',
+        bitrate: (map['bitrate'] as num?)?.toInt(),
+        sampleRate: (map['sampleRate'] as num?)?.toInt(),
+        isSelected: map['selected'] as bool? ?? false,
       );
 
   final int groupIndex;
   final int trackIndex;
   final String id;
-  final String language;
-  final String label;
+  final String languageCode;
+  final String languageDisplay;
+  final String displayName;
+  final String mimeType;
+  final int channelCount;
+  final String channelDescription;
+  final int? bitrate;
+  final int? sampleRate;
+  final bool isSelected;
+
+  RobustAudioTrack copyWith({bool? isSelected}) {
+    return RobustAudioTrack(
+      groupIndex: groupIndex,
+      trackIndex: trackIndex,
+      id: id,
+      languageCode: languageCode,
+      languageDisplay: languageDisplay,
+      displayName: displayName,
+      mimeType: mimeType,
+      channelCount: channelCount,
+      channelDescription: channelDescription,
+      bitrate: bitrate,
+      sampleRate: sampleRate,
+      isSelected: isSelected ?? this.isSelected,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    if (other is! RobustAudioTrack) return false;
+    return groupIndex == other.groupIndex &&
+        trackIndex == other.trackIndex &&
+        id == other.id;
+  }
+
+  @override
+  int get hashCode => Object.hash(groupIndex, trackIndex, id);
 }
 
 class RobustSubtitleTrack {

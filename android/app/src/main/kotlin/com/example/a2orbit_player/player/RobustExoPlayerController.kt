@@ -27,6 +27,7 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
+import androidx.media3.common.Format
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
@@ -59,6 +60,7 @@ import java.io.IOException
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import java.util.Locale
 
 /**
  * Repeat modes for A-B repeat functionality
@@ -129,8 +131,9 @@ class RobustExoPlayerController(
     private var subtitlesEnabled: Boolean = true
     
     // Audio track support
+    private var currentAudioGroupIndex: Int = -1
     private var currentAudioTrackIndex: Int = -1
-    private var availableAudioTracks: List<Map<String, Any>> = emptyList()
+    private var availableAudioTracks: List<Map<String, Any?>> = emptyList()
     
     // PiP support
     private var isInPiPMode: Boolean = false
@@ -509,84 +512,204 @@ class RobustExoPlayerController(
     /**
      * Get available audio tracks
      */
-    fun getAudioTracks(): List<Map<String, Any>> {
-        val audioTracks = mutableListOf<Map<String, Any>>()
-        
+    fun getAudioTracks(): List<Map<String, Any?>> {
+        val audioTracks = mutableListOf<MutableMap<String, Any?>>()
+        var fallbackIndex = 1
+        var selectedGroup = -1
+        var selectedTrack = -1
+
         try {
             val tracks = player.currentTracks
             tracks.groups.forEachIndexed { groupIndex, group ->
-                if (group.isSelected && group.type == C.TRACK_TYPE_AUDIO) {
-                    val trackGroup = group.mediaTrackGroup
-                    for (i in 0 until trackGroup.length) {
-                        val format = trackGroup.getFormat(i)
-                        audioTracks.add(mapOf(
-                            "groupIndex" to groupIndex,
-                            "trackIndex" to i,
-                            "id" to (format.id ?: "track_$i"),
-                            "language" to (format.language ?: "Unknown"),
-                            "label" to (format.label ?: format.language ?: "Audio Track ${i + 1}"),
-                            "selected" to (i == currentAudioTrackIndex),
-                            "channels" to (format.channelCount ?: 0),
-                            "sampleRate" to (format.sampleRate ?: 0)
-                        ))
+                if (group.type != C.TRACK_TYPE_AUDIO) return@forEachIndexed
+
+                val trackGroup = group.mediaTrackGroup
+                for (trackIndex in 0 until trackGroup.length) {
+                    val format = trackGroup.getFormat(trackIndex)
+
+                    val languageCode = format.language?.takeIf { it.isNotBlank() } ?: "und"
+                    val languageDisplay = resolveLanguageDisplay(languageCode)
+                    val channelCount = format.channelCount ?: 0
+                    val channelDescription = describeChannelCount(channelCount)
+
+                    val baseLabel = format.label?.takeIf { it.isNotBlank() }
+                        ?: languageDisplay
+                        ?: "Track ${fallbackIndex++}"
+
+                    val displayName = buildString {
+                        append(baseLabel)
+                        if (!channelDescription.isNullOrBlank()) {
+                            append(" (")
+                            append(channelDescription)
+                            append(")")
+                        }
                     }
+
+                    val isSelected = runCatching { group.isTrackSelected(trackIndex) }.getOrDefault(false)
+                    if (isSelected) {
+                        selectedGroup = groupIndex
+                        selectedTrack = trackIndex
+                    }
+
+                    val trackInfo = mutableMapOf<String, Any?>(
+                        "groupIndex" to groupIndex,
+                        "trackIndex" to trackIndex,
+                        "id" to (format.id ?: "track_${groupIndex}_$trackIndex"),
+                        "language" to languageCode,
+                        "languageDisplay" to (languageDisplay ?: "Unknown"),
+                        "label" to baseLabel,
+                        "displayName" to displayName,
+                        "mimeType" to (format.sampleMimeType ?: ""),
+                        "channelCount" to channelCount,
+                        "channelDescription" to channelDescription,
+                        "selected" to isSelected
+                    )
+
+                    val bitrate = format.bitrate
+                    if (bitrate != Format.NO_VALUE) {
+                        trackInfo["bitrate"] = bitrate
+                    }
+
+                    val sampleRate = format.sampleRate
+                    if (sampleRate != Format.NO_VALUE) {
+                        trackInfo["sampleRate"] = sampleRate
+                    }
+
+                    audioTracks.add(trackInfo)
                 }
             }
-            
-            availableAudioTracks = audioTracks
+
+            if (selectedGroup == -1 && audioTracks.isNotEmpty()) {
+                val first = audioTracks.first()
+                selectedGroup = first["groupIndex"] as Int
+                selectedTrack = first["trackIndex"] as Int
+                first["selected"] = true
+            }
+
+            currentAudioGroupIndex = selectedGroup
+            currentAudioTrackIndex = selectedTrack
+
+            val finalTracks = audioTracks.map { it.toMap() }
+            availableAudioTracks = finalTracks
             Log.d(TAG, "Found ${audioTracks.size} audio tracks")
-            
+
         } catch (e: Exception) {
             Log.e(TAG, "Error getting audio tracks", e)
         }
-        
-        return audioTracks
+
+        return availableAudioTracks
+    }
+
+    private fun resolveLanguageDisplay(code: String?): String? {
+        if (code.isNullOrBlank() || code == "und") return null
+        return try {
+            val locale = if (code.contains("-")) {
+                val parts = code.split("-")
+                when (parts.size) {
+                    1 -> Locale(parts[0])
+                    2 -> Locale(parts[0], parts[1])
+                    else -> Locale(parts[0], parts[1], parts[2])
+                }
+            } else {
+                Locale(code)
+            }
+            val display = locale.displayLanguage
+            display.takeIf { it.isNotBlank() }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun describeChannelCount(count: Int): String? {
+        return when {
+            count <= 0 -> null
+            count == 1 -> "Mono"
+            count == 2 -> "Stereo"
+            count == 6 -> "5.1"
+            count == 8 -> "7.1"
+            count >= 6 -> "${count}-channel"
+            else -> "${count}-channel"
+        }
     }
     
     /**
      * Select audio track by index
      */
-    fun selectAudioTrack(groupIndex: Int, trackIndex: Int) {
-        try {
-            val tracks = player.currentTracks
-            val audioGroup = tracks.groups.getOrNull(groupIndex)
-            
-            if (audioGroup?.type == C.TRACK_TYPE_AUDIO) {
-                val trackSelectionParameters = trackSelector.parameters
-                    .buildUpon()
-                    .setOverrideForType(
-                        TrackSelectionOverride(
-                            audioGroup.mediaTrackGroup,
-                            trackIndex
-                        )
-                    )
-                    .build()
-                
-                trackSelector.setParameters(trackSelectionParameters)
-                currentAudioTrackIndex = trackIndex
-                
-                mainScope.launch {
-                    _events.emit(
-                        PlayerEvent.AudioTrackChanged(groupIndex, trackIndex)
-                    )
-                }
-                
-                Log.d(TAG, "Selected audio track: group=$groupIndex, track=$trackIndex")
-            } else {
-                Log.w(TAG, "Invalid audio track selection: group=$groupIndex, track=$trackIndex")
+    fun selectAudioTrack(groupIndex: Int, trackIndex: Int): Boolean {
+        val tracks = player.currentTracks
+        val audioGroup = tracks.groups.getOrNull(groupIndex)
+
+        if (audioGroup?.type != C.TRACK_TYPE_AUDIO) {
+            Log.w(TAG, "Invalid audio track selection: group=$groupIndex, track=$trackIndex")
+            return false
+        }
+
+        val previousGroup = currentAudioGroupIndex
+        val previousTrack = currentAudioTrackIndex
+
+        return try {
+            val override = TrackSelectionOverride(
+                audioGroup.mediaTrackGroup,
+                listOf(trackIndex)
+            )
+
+            val parametersBuilder = trackSelector.parameters.buildUpon()
+            parametersBuilder.clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+            parametersBuilder.setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+            parametersBuilder.addOverride(override)
+
+            trackSelector.setParameters(parametersBuilder)
+
+            currentAudioGroupIndex = groupIndex
+            currentAudioTrackIndex = trackIndex
+
+            mainScope.launch {
+                _events.emit(
+                    PlayerEvent.AudioTrackChanged(groupIndex, trackIndex)
+                )
             }
-            
+
+            updateAudioTracks()
+            Log.d(TAG, "Selected audio track: group=$groupIndex, track=$trackIndex")
+            true
         } catch (e: Exception) {
             Log.e(TAG, "Error selecting audio track", e)
+            restoreAudioOverride(previousGroup, previousTrack)
+            currentAudioGroupIndex = previousGroup
+            currentAudioTrackIndex = previousTrack
+            updateAudioTracks()
             emitError("AUDIO_TRACK_ERROR", "Failed to select audio track: ${e.message}")
+            false
         }
+    }
+
+    private fun restoreAudioOverride(groupIndex: Int, trackIndex: Int) {
+        if (groupIndex == -1 || trackIndex == -1) return
+        val tracks = player.currentTracks
+        val audioGroup = tracks.groups.getOrNull(groupIndex) ?: return
+        if (audioGroup.type != C.TRACK_TYPE_AUDIO) return
+
+        val override = TrackSelectionOverride(
+            audioGroup.mediaTrackGroup,
+            listOf(trackIndex)
+        )
+
+        val parametersBuilder = trackSelector.parameters.buildUpon()
+        parametersBuilder.clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+        parametersBuilder.setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+        parametersBuilder.addOverride(override)
+        trackSelector.setParameters(parametersBuilder)
     }
     
     /**
      * Get current audio track info
      */
-    fun getCurrentAudioTrack(): Map<String, Any>? {
-        return availableAudioTracks.getOrNull(currentAudioTrackIndex)
+    fun getCurrentAudioTrack(): Map<String, Any?>? {
+        if (currentAudioGroupIndex == -1 || currentAudioTrackIndex == -1) return null
+        return availableAudioTracks.firstOrNull { track ->
+            (track["groupIndex"] as? Int == currentAudioGroupIndex) &&
+            (track["trackIndex"] as? Int == currentAudioTrackIndex)
+        }
     }
     
     /**
@@ -1728,7 +1851,7 @@ class RobustExoPlayerController(
         data class SubtitleStateChanged(val enabled: Boolean) : PlayerEvent
         data class SubtitleTrackChanged(val index: Int) : PlayerEvent
         data class AudioTrackChanged(val groupIndex: Int, val trackIndex: Int) : PlayerEvent
-        data class AudioTracksChanged(val tracks: List<Map<String, Any>>) : PlayerEvent
+        data class AudioTracksChanged(val tracks: List<Map<String, Any?>>) : PlayerEvent
         data class PiPModeChanged(val isInPiP: Boolean) : PlayerEvent
         data class BackgroundPlaybackChanged(val enabled: Boolean) : PlayerEvent
         data class AudioOnlyModeChanged(val enabled: Boolean) : PlayerEvent

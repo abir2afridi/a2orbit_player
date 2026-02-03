@@ -45,6 +45,9 @@ object RobustPlayerConstants {
         const val FINALIZE_VOLUME_GESTURE = "finalizeVolumeGesture"
         const val HANDLE_SEEK_GESTURE = "handleSeekGesture"
         const val RESET_GESTURE_STATES = "resetGestureStates"
+        const val GET_AUDIO_TRACKS = "getAudioTracks"
+        const val SELECT_AUDIO_TRACK = "selectAudioTrack"
+        const val GET_CURRENT_AUDIO_TRACK = "getCurrentAudioTrack"
     }
     
     // Error codes
