@@ -13,7 +13,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
-import android.provider.Settings
 import android.util.Log
 import android.view.WindowManager
 import android.webkit.MimeTypeMap
@@ -84,6 +83,9 @@ class RobustExoPlayerController(
     companion object {
         private const val TAG = "RobustExoPlayerController"
         
+        private const val DEFAULT_BRIGHTNESS = 0.5f
+        private const val MIN_BRIGHTNESS = 0.05f
+
         // Supported video formats and their MIME types
         private val VIDEO_MIME_TYPES = mapOf(
             "mp4" to "video/mp4",
@@ -171,9 +173,9 @@ class RobustExoPlayerController(
     }
 
     // Gesture control state
-    private var brightnessBeforeGesture: Float? = null
-    private var autoBrightnessBeforeGesture: Boolean? = null
+    private var playerBrightness: Float = DEFAULT_BRIGHTNESS
     private var volumeBeforeGesture: Int? = null
+    private var lastVolumeApplied: Int? = null
     private var maxVolumeCached: Int? = null
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
     private val maxVolume: Int
@@ -190,122 +192,30 @@ class RobustExoPlayerController(
         player.addListener(this)
         lifecycleOwner?.lifecycle?.addObserver(this)
         Log.d(TAG, "RobustExoPlayerController initialized")
+        applyWindowBrightness(playerBrightness)
     }
     
-    /**
-     * Handle brightness gesture
-     */
-    fun prepareBrightnessGesture(): Float? {
-        return try {
-            val activity = activity ?: return null
-            val resolver = activity.contentResolver
+    fun setPlayerBrightness(value: Float): Float {
+        val clamped = value.coerceIn(MIN_BRIGHTNESS, 1.0f)
+        playerBrightness = clamped
 
-            if (autoBrightnessBeforeGesture == null) {
-                val autoMode = try {
-                    Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS_MODE)
-                } catch (e: Exception) {
-                    Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL
-                }
-                autoBrightnessBeforeGesture = autoMode == Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC
-                if (autoMode == Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC) {
-                    Settings.System.putInt(
-                        resolver,
-                        Settings.System.SCREEN_BRIGHTNESS_MODE,
-                        Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL
-                    )
-                }
-            }
+        applyWindowBrightness(clamped)
 
-            if (!Settings.System.canWrite(activity)) {
-                Log.w(TAG, "WRITE_SETTINGS permission not granted")
-            }
-
-            if (brightnessBeforeGesture == null) {
-                val sysBrightness = try {
-                    Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS)
-                } catch (e: Exception) {
-                    128
-                }
-                brightnessBeforeGesture = sysBrightness / 255f
-            }
-
-            brightnessBeforeGesture
-        } catch (e: Exception) {
-            Log.e(TAG, "Error preparing brightness gesture", e)
-            null
+        mainScope.launch {
+            _events.emit(PlayerEvent.BrightnessChanged(clamped))
         }
+
+        return clamped
     }
 
-    fun applyBrightnessLevel(level: Float): Float? {
-        return try {
-            val activity = activity ?: return null
-            val resolver = activity.contentResolver
-            val clamped = level.coerceIn(0f, 1f)
-            val systemValue = (clamped * 255).roundToInt().coerceIn(0, 255)
-
-            if (Settings.System.canWrite(activity)) {
-                Settings.System.putInt(resolver, Settings.System.SCREEN_BRIGHTNESS, systemValue)
-            }
-
-            val layoutParams = activity.window.attributes
-            layoutParams.screenBrightness = clamped
-            activity.window.attributes = layoutParams
-
-            mainScope.launch {
-                _events.emit(PlayerEvent.BrightnessChanged(clamped))
-            }
-
-            clamped
-        } catch (e: Exception) {
-            Log.e(TAG, "Error applying brightness level", e)
-            null
-        }
-    }
-
-    fun finalizeBrightnessGesture(level: Float?): Float? {
-        return try {
-            val activity = activity ?: return null
-            val resolver = activity.contentResolver
-            val targetLevel = level ?: brightnessBeforeGesture ?: return null
-            val clamped = targetLevel.coerceIn(0f, 1f)
-            val systemValue = (clamped * 255).roundToInt().coerceIn(0, 255)
-
-            if (Settings.System.canWrite(activity)) {
-                Settings.System.putInt(resolver, Settings.System.SCREEN_BRIGHTNESS, systemValue)
-            }
-
-            val layoutParams = activity.window.attributes
-            layoutParams.screenBrightness = clamped
-            activity.window.attributes = layoutParams
-
-            val autoMode = autoBrightnessBeforeGesture
-            if (autoMode != null) {
-                Settings.System.putInt(
-                    resolver,
-                    Settings.System.SCREEN_BRIGHTNESS_MODE,
-                    if (autoMode) Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC else Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL
-                )
-            }
-
-            brightnessBeforeGesture = null
-            autoBrightnessBeforeGesture = null
-
-            mainScope.launch {
-                _events.emit(PlayerEvent.BrightnessChanged(clamped))
-            }
-
-            clamped
-        } catch (e: Exception) {
-            Log.e(TAG, "Error finalizing brightness gesture", e)
-            null
-        }
-    }
+    fun getPlayerBrightness(): Float = playerBrightness
 
     fun prepareVolumeGesture(): Map<String, Int>? {
         return try {
             val audioManager = audioManager ?: return null
             val currentVolume = audioManager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
             volumeBeforeGesture = currentVolume
+            lastVolumeApplied = currentVolume
             mapOf(
                 "current" to currentVolume,
                 "max" to maxVolume
@@ -322,11 +232,14 @@ class RobustExoPlayerController(
             val resolvedLevel = level.coerceIn(0f, 1f)
             val targetVolume = (resolvedLevel * maxVolume).roundToInt().coerceIn(0, maxVolume)
 
-            audioManager.setStreamVolume(
-                android.media.AudioManager.STREAM_MUSIC,
-                targetVolume,
-                0
-            )
+            if (lastVolumeApplied != targetVolume) {
+                audioManager.setStreamVolume(
+                    android.media.AudioManager.STREAM_MUSIC,
+                    targetVolume,
+                    android.media.AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE
+                )
+                lastVolumeApplied = targetVolume
+            }
 
             mainScope.launch {
                 _events.emit(PlayerEvent.VolumeChanged(targetVolume, maxVolume))
@@ -345,14 +258,17 @@ class RobustExoPlayerController(
     fun finalizeVolumeGesture(level: Float?): Map<String, Int>? {
         return try {
             val audioManager = audioManager ?: return null
-            val resolvedLevel = (level ?: (volumeBeforeGesture?.toFloat()?.div(maxVolume) ?: 0f)).coerceIn(0f, 1f)
+            val resolvedLevel = (level ?: (lastVolumeApplied?.toFloat()?.div(maxVolume) ?: volumeBeforeGesture?.toFloat()?.div(maxVolume) ?: 0f)).coerceIn(0f, 1f)
             val targetVolume = (resolvedLevel * maxVolume).roundToInt().coerceIn(0, maxVolume)
 
-            audioManager.setStreamVolume(
-                android.media.AudioManager.STREAM_MUSIC,
-                targetVolume,
-                android.media.AudioManager.FLAG_SHOW_UI
-            )
+            if (lastVolumeApplied != targetVolume) {
+                audioManager.setStreamVolume(
+                    android.media.AudioManager.STREAM_MUSIC,
+                    targetVolume,
+                    android.media.AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE
+                )
+                lastVolumeApplied = targetVolume
+            }
 
             volumeBeforeGesture = null
 
@@ -422,13 +338,22 @@ class RobustExoPlayerController(
      */
     fun resetGestureStates() {
         try {
-            brightnessBeforeGesture = null
-            autoBrightnessBeforeGesture = null
             volumeBeforeGesture = null
+            lastVolumeApplied = null
             pendingSeekPosition = null
             
         } catch (e: Exception) {
             Log.e(TAG, "Error resetting gesture states", e)
+        }
+    }
+
+    private fun applyWindowBrightness(value: Float) {
+        val activity = activity ?: return
+        val clamped = value.coerceIn(MIN_BRIGHTNESS, 1.0f)
+        activity.runOnUiThread {
+            val params = activity.window.attributes
+            params.screenBrightness = clamped
+            activity.window.attributes = params
         }
     }
     

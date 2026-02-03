@@ -298,16 +298,12 @@ class RobustPlayerManager(
         Log.d(TAG, "Gestures ${if (enabled) "enabled" else "disabled"} for viewId: $viewId")
     }
     
-    fun prepareBrightnessGesture(viewId: Int): Double? {
-        return getController(viewId)?.prepareBrightnessGesture()?.toDouble()
+    fun setPlayerBrightness(viewId: Int, brightness: Float): Double? {
+        return getController(viewId)?.setPlayerBrightness(brightness)?.toDouble()
     }
 
-    fun applyBrightnessLevel(viewId: Int, level: Float): Double? {
-        return getController(viewId)?.applyBrightnessLevel(level)?.toDouble()
-    }
-
-    fun finalizeBrightnessGesture(viewId: Int, level: Float?): Double? {
-        return getController(viewId)?.finalizeBrightnessGesture(level)?.toDouble()
+    fun getPlayerBrightness(viewId: Int): Double? {
+        return getController(viewId)?.getPlayerBrightness()?.toDouble()
     }
 
     fun prepareVolumeGesture(viewId: Int): Map<String, Int>? {

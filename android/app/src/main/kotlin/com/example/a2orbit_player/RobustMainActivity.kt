@@ -229,33 +229,14 @@ class RobustMainActivity : FlutterActivity() {
                     result.success(null)
                 }
 
-                RobustPlayerConstants.Methods.PREPARE_BRIGHTNESS_GESTURE -> {
-                    if (viewId == null) {
-                        result.error("invalid_args", "viewId required", null)
+                RobustPlayerConstants.Methods.SET_PLAYER_BRIGHTNESS -> {
+                    val brightness = call.argument<Number>("brightness")?.toFloat()
+                    if (viewId == null || brightness == null) {
+                        result.error("invalid_args", "viewId and brightness required", null)
                         return
                     }
-                    val brightness = manager.prepareBrightnessGesture(viewId)
-                    result.success(brightness)
-                }
-
-                RobustPlayerConstants.Methods.APPLY_BRIGHTNESS_LEVEL -> {
-                    val level = call.argument<Number>("level")?.toFloat()
-                    if (viewId == null || level == null) {
-                        result.error("invalid_args", "viewId and level required", null)
-                        return
-                    }
-                    val applied = manager.applyBrightnessLevel(viewId, level)
+                    val applied = manager.setPlayerBrightness(viewId, brightness)
                     result.success(applied)
-                }
-
-                RobustPlayerConstants.Methods.FINALIZE_BRIGHTNESS_GESTURE -> {
-                    val finalLevel = call.argument<Number>("level")?.toFloat()
-                    if (viewId == null) {
-                        result.error("invalid_args", "viewId required", null)
-                        return
-                    }
-                    val committed = manager.finalizeBrightnessGesture(viewId, finalLevel)
-                    result.success(committed)
                 }
 
                 RobustPlayerConstants.Methods.PREPARE_VOLUME_GESTURE -> {

@@ -83,14 +83,8 @@ class RobustPlayerController {
   Future<void> setGesturesEnabled(bool enabled) async =>
       _invoke<void>('enableGestures', {'enabled': enabled});
 
-  Future<double?> prepareBrightnessGesture() async =>
-      _invoke<double>('prepareBrightnessGesture');
-
-  Future<double?> applyBrightnessLevel(double level) async =>
-      _invoke<double>('applyBrightnessLevel', {'level': level});
-
-  Future<double?> finalizeBrightnessGesture(double? level) async =>
-      _invoke<double>('finalizeBrightnessGesture', {'level': level});
+  Future<double?> setPlayerBrightness(double brightness) async =>
+      _invoke<double>('setPlayerBrightness', {'brightness': brightness});
 
   Future<Map<String, dynamic>?> prepareVolumeGesture() async {
     final result = await _invoke<Map<dynamic, dynamic>>('prepareVolumeGesture');

@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/providers/app_providers.dart';
 import '../services/playback_history_service.dart';
@@ -33,6 +34,7 @@ class _RobustVideoPlayerWidgetState
   StreamSubscription<RobustPlayerEvent>? _eventSubscription;
   ProviderSubscription<AppSettings>? _settingsSubscription;
   late PlaybackHistoryService _historyService;
+  late SharedPreferences _prefs;
 
   bool _isPlayerReady = false;
   bool _isLoading = true;
@@ -49,18 +51,28 @@ class _RobustVideoPlayerWidgetState
   final GlobalKey _bottomBarKey = GlobalKey();
   final GlobalKey _gestureOverlayKey = GlobalKey();
 
+  bool _isSidebarExpanded = false;
   String? _errorMessage;
 
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   Duration? _resumePosition;
 
-  double _brightnessPercent = 0.5;
+  static const double _defaultPlayerBrightness = 0.5;
+  static const double _minPlayerBrightness = 0.05;
+  static const String _playerBrightnessKey = 'player_brightness';
+
+  double _playerBrightness = _defaultPlayerBrightness;
+  double get _brightnessPercent => _playerBrightness.clamp(0.0, 1.0);
   double _volumePercent = 0.5;
   Duration? _seekPreviewDelta;
   bool _showGestureOverlay = false;
   String? _activeGesture;
   Timer? _gestureOverlayTimer;
+  double? _brightnessGestureStart;
+  double _brightnessGestureDelta = 0;
+  double? _volumeGestureStart;
+  double _volumeGestureDelta = 0;
 
   bool _isPlaying = false;
 
@@ -75,11 +87,18 @@ class _RobustVideoPlayerWidgetState
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    final prefs = ref.read(sharedPreferencesProvider);
-    _historyService = PlaybackHistoryService(prefs);
+    _prefs = ref.read(sharedPreferencesProvider);
+    _historyService = PlaybackHistoryService(_prefs);
     _settings = ref.read(settingsProvider);
     _applySettings(_settings!);
     _loadResumePosition();
+
+    final storedBrightness =
+        _prefs.getDouble(_playerBrightnessKey) ?? _defaultPlayerBrightness;
+    _playerBrightness = math.min(
+      1.0,
+      math.max(_minPlayerBrightness, storedBrightness),
+    );
 
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
@@ -91,6 +110,28 @@ class _RobustVideoPlayerWidgetState
       if (!mounted) return;
       _onSettingsChanged(previous, next);
     });
+  }
+
+  Future<void> _applyPlayerBrightnessToNative() async {
+    final applied = await _robustController.setPlayerBrightness(
+      _playerBrightness,
+    );
+    if (!mounted || applied == null) return;
+    if ((applied - _playerBrightness).abs() > 0.0001) {
+      setState(() {
+        _playerBrightness = math.min(
+          1.0,
+          math.max(_minPlayerBrightness, applied),
+        );
+      });
+    }
+  }
+
+  Future<void> _persistPlayerBrightness() async {
+    await _prefs.setDouble(
+      _playerBrightnessKey,
+      math.min(1.0, math.max(_minPlayerBrightness, _playerBrightness)),
+    );
   }
 
   void _handleVerticalGesture(DragUpdateDetails details) {
@@ -118,17 +159,22 @@ class _RobustVideoPlayerWidgetState
   }
 
   void _prepareBrightnessGesture() {
-    unawaited(() async {
-      final initial = await _robustController.prepareBrightnessGesture();
-      if (!mounted || initial == null) return;
-      setState(() {
-        _brightnessPercent = initial.clamp(0.0, 1.0);
-        _activeGesture = 'brightness';
-      });
-    }());
+    final current = _playerBrightness.clamp(0.0, 1.0);
+    _brightnessGestureStart = current;
+    _brightnessGestureDelta = 0;
+    setState(() {
+      _activeGesture = 'brightness';
+    });
   }
 
   void _prepareVolumeGesture() {
+    final currentPercent = _volumePercent.clamp(0.0, 1.0);
+    _volumeGestureStart = currentPercent;
+    _volumeGestureDelta = 0;
+    setState(() {
+      _activeGesture = 'volume';
+    });
+
     unawaited(() async {
       final info = await _robustController.prepareVolumeGesture();
       if (!mounted || info == null) return;
@@ -136,7 +182,9 @@ class _RobustVideoPlayerWidgetState
       final max = (info['max'] as num?)?.toDouble() ?? 0.0;
       final percent = max > 0 ? (current / max).clamp(0.0, 1.0) : 0.0;
       setState(() {
+        _volumeGestureStart = percent;
         _volumePercent = percent;
+        _volumeGestureDelta = 0;
         _activeGesture = 'volume';
       });
     }());
@@ -158,19 +206,40 @@ class _RobustVideoPlayerWidgetState
   }
 
   void _updateBrightness(double deltaPixels) {
-    final deltaPercent = deltaPixels / 300;
-    final next = (_brightnessPercent + deltaPercent).clamp(0.0, 1.0);
+    final height = MediaQuery.of(context).size.height;
+    if (height <= 0) return;
+
+    _brightnessGestureDelta += deltaPixels / height;
+    final baseline = _brightnessGestureStart ?? _playerBrightness;
+    final nextBrightness = (baseline + _brightnessGestureDelta).clamp(
+      _minPlayerBrightness,
+      1.0,
+    );
     setState(() {
-      _brightnessPercent = next;
+      _playerBrightness = nextBrightness;
       _activeGesture = 'brightness';
     });
-    unawaited(_robustController.applyBrightnessLevel(next));
+    unawaited(() async {
+      final applied = await _robustController.setPlayerBrightness(
+        nextBrightness,
+      );
+      if (!mounted || applied == null) return;
+      if ((applied - _playerBrightness).abs() > 0.0001) {
+        setState(() {
+          _playerBrightness = applied.clamp(_minPlayerBrightness, 1.0);
+        });
+      }
+    }());
     _showGestureFeedback();
   }
 
   void _updateVolume(double deltaPixels) {
-    final deltaPercent = deltaPixels / 300;
-    final next = (_volumePercent + deltaPercent).clamp(0.0, 1.0);
+    final height = MediaQuery.of(context).size.height;
+    if (height <= 0) return;
+
+    _volumeGestureDelta += deltaPixels / height;
+    final baseline = _volumeGestureStart ?? _volumePercent;
+    final next = (baseline + _volumeGestureDelta).clamp(0.0, 1.0);
     setState(() {
       _volumePercent = next;
       _activeGesture = 'volume';
@@ -229,11 +298,14 @@ class _RobustVideoPlayerWidgetState
     final seekDelta = _seekPreviewDelta;
 
     if (gesture == 'brightness') {
-      final value = _brightnessPercent.clamp(0.0, 1.0);
-      unawaited(_robustController.finalizeBrightnessGesture(value));
+      _persistPlayerBrightness();
+      _brightnessGestureStart = null;
+      _brightnessGestureDelta = 0;
     } else if (gesture == 'volume') {
       final value = _volumePercent.clamp(0.0, 1.0);
       unawaited(_robustController.finalizeVolumeGesture(value));
+      _volumeGestureStart = null;
+      _volumeGestureDelta = 0;
     }
 
     unawaited(_robustController.resetGestureStates());
@@ -250,12 +322,6 @@ class _RobustVideoPlayerWidgetState
         _activeGesture = null;
       });
     });
-  }
-
-  Future<void> _toggleOrientationLockSetting() async {
-    final next = !_orientationLocked;
-    await _robustController.setOrientationLocked(next);
-    await _robustController.setAutoRotateEnabled(!next);
   }
 
   Future<void> _toggleOrientation() async {
@@ -406,9 +472,9 @@ class _RobustVideoPlayerWidgetState
         _handleGestureEnd();
       }
     } else if (event is RobustBrightnessChangedEvent) {
-      final brightness = event.brightness.clamp(0.0, 1.0);
+      final brightness = event.brightness.clamp(_minPlayerBrightness, 1.0);
       setState(() {
-        _brightnessPercent = brightness;
+        _playerBrightness = brightness;
       });
       if (_activeGesture == 'brightness') {
         _showGestureFeedback();
@@ -465,6 +531,7 @@ class _RobustVideoPlayerWidgetState
         _hasError = false;
       });
 
+      await _applyPlayerBrightnessToNative();
       _startProgressSaveTimer();
       _configureSleepTimer(_settings);
       _restartHideControlsTimer();
@@ -1011,6 +1078,52 @@ class _RobustVideoPlayerWidgetState
 
   Widget _buildSideBar() {
     final speed = _settings?.playbackSpeed ?? 1.0;
+
+    if (_isSidebarExpanded) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _SideBarButton(
+            icon: Icons.headphones,
+            isSelected: _isAudioOnly,
+            onTap: () {
+              setState(() {
+                _isAudioOnly = !_isAudioOnly;
+              });
+              _restartHideControlsTimer();
+            },
+          ),
+          const SizedBox(height: 12),
+          _SideBarButton(
+            icon: Icons.repeat_one,
+            isSelected: true, // Example state
+            onTap: () {
+              _restartHideControlsTimer();
+            },
+          ),
+          const SizedBox(height: 12),
+          _SideBarButton(
+            icon: Icons.picture_in_picture_alt,
+            onTap: () {
+              _robustController.enterPictureInPicture();
+              _restartHideControlsTimer();
+            },
+          ),
+          const SizedBox(height: 12),
+          _SideBarButton(
+            icon: Icons.chevron_left,
+            onTap: () {
+              setState(() {
+                _isSidebarExpanded = false;
+              });
+              _restartHideControlsTimer();
+            },
+          ),
+        ],
+      );
+    }
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1030,7 +1143,9 @@ class _RobustVideoPlayerWidgetState
         _SideBarButton(
           icon: Icons.camera_alt_outlined,
           showBadge: true,
-          onTap: () {},
+          onTap: () {
+            _restartHideControlsTimer();
+          },
         ),
         const SizedBox(height: 12),
         _SideBarButton(
@@ -1042,11 +1157,15 @@ class _RobustVideoPlayerWidgetState
           },
         ),
         const SizedBox(height: 12),
-        _SideBarButton(icon: Icons.headphones, isSelected: true, onTap: () {}),
-        const SizedBox(height: 12),
-        _SideBarButton(icon: Icons.repeat_one, isSelected: true, onTap: () {}),
-        const SizedBox(height: 12),
-        _SideBarButton(icon: Icons.chevron_right, onTap: () {}),
+        _SideBarButton(
+          icon: Icons.chevron_right,
+          onTap: () {
+            setState(() {
+              _isSidebarExpanded = true;
+            });
+            _restartHideControlsTimer();
+          },
+        ),
       ],
     );
   }
