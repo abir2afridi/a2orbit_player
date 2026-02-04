@@ -48,6 +48,8 @@ object RobustPlayerConstants {
         const val GET_AUDIO_TRACKS = "getAudioTracks"
         const val SELECT_AUDIO_TRACK = "selectAudioTrack"
         const val GET_CURRENT_AUDIO_TRACK = "getCurrentAudioTrack"
+        const val SET_AUDIO_DECODER_PREFERENCES = "setAudioDecoderPreferences"
+        const val GET_AUDIO_DECODER_CAPABILITIES = "getAudioDecoderCapabilities"
     }
     
     // Error codes

@@ -128,12 +128,42 @@ class RobustPlayerController {
 
   Future<List<Map<String, dynamic>>> getSubtitleTracks() async {
     final result = await _invoke<List<dynamic>>('getSubtitleTracks');
-    return result?.cast<Map<String, dynamic>>() ?? [];
+    if (result == null) return const [];
+
+    return result
+        .map((entry) => _normalizePlatformMap(entry))
+        .toList(growable: false);
   }
 
   Future<List<Map<String, dynamic>>> getAudioTracks() async {
     final result = await _invoke<List<dynamic>>('getAudioTracks');
-    return result?.cast<Map<String, dynamic>>() ?? [];
+    if (result == null) return const [];
+
+    return result
+        .map((entry) => _normalizePlatformMap(entry))
+        .toList(growable: false);
+  }
+
+  Map<String, dynamic> _normalizePlatformMap(dynamic value) {
+    if (value is Map<Object?, Object?>) {
+      return value.map(
+        (key, mapValue) => MapEntry(key?.toString() ?? '', mapValue),
+      );
+    }
+
+    if (value is Map<dynamic, dynamic>) {
+      return value.map(
+        (key, mapValue) => MapEntry(key?.toString() ?? '', mapValue),
+      );
+    }
+
+    if (value is Map<String, dynamic>) {
+      return Map<String, dynamic>.from(value);
+    }
+
+    throw ArgumentError(
+      'Unsupported map structure received from platform channel: $value',
+    );
   }
 
   Future<bool> selectAudioTrack(int groupIndex, int trackIndex) async {

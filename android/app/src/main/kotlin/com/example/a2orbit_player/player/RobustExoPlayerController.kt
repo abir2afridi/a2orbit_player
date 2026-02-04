@@ -27,6 +27,7 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
+import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.common.Format
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
@@ -45,6 +46,7 @@ import android.view.View
 import android.app.PictureInPictureParams
 import android.content.res.Configuration
 import android.util.Rational
+import android.widget.Toast
 import android.graphics.Bitmap
 import java.io.FileOutputStream
 import kotlinx.coroutines.CoroutineScope
@@ -116,7 +118,9 @@ class RobustExoPlayerController(
     
     val player: ExoPlayer = ExoPlayer.Builder(context)
         .setTrackSelector(trackSelector)
-        .build()
+        .build().apply {
+            setSeekParameters(SeekParameters.CLOSEST_SYNC)
+        }
 
     private var playerView: PlayerView? = null
     private var currentMediaItem: MediaItem? = null
@@ -134,6 +138,14 @@ class RobustExoPlayerController(
     private var currentAudioGroupIndex: Int = -1
     private var currentAudioTrackIndex: Int = -1
     private var availableAudioTracks: List<Map<String, Any?>> = emptyList()
+    private var audioDecoderPreferences: AudioDecoderPreferences = AudioDecoderPreferences()
+    private var audioDecoderCapabilities: Map<String, Boolean> = AudioDecoderCapabilityDetector.getCapabilities()
+    private var lastSuccessfulAudioGroupIndex: Int = -1
+    private var lastSuccessfulAudioTrackIndex: Int = -1
+    private var previousSuccessfulAudioGroupIndex: Int = -1
+    private var previousSuccessfulAudioTrackIndex: Int = -1
+    private var isRestoringAudioTrack: Boolean = false
+    private var isEnsuringAudioTrack: Boolean = false
     
     // PiP support
     private var isInPiPMode: Boolean = false
@@ -526,6 +538,10 @@ class RobustExoPlayerController(
                 val trackGroup = group.mediaTrackGroup
                 for (trackIndex in 0 until trackGroup.length) {
                     val format = trackGroup.getFormat(trackIndex)
+                    val mimeType = format.sampleMimeType ?: ""
+                    if (!isAudioMimeAllowed(mimeType)) {
+                        continue
+                    }
 
                     val languageCode = format.language?.takeIf { it.isNotBlank() } ?: "und"
                     val languageDisplay = resolveLanguageDisplay(languageCode)
@@ -588,16 +604,71 @@ class RobustExoPlayerController(
 
             currentAudioGroupIndex = selectedGroup
             currentAudioTrackIndex = selectedTrack
+            if (currentAudioGroupIndex != -1 && currentAudioTrackIndex != -1) {
+                lastSuccessfulAudioGroupIndex = currentAudioGroupIndex
+                lastSuccessfulAudioTrackIndex = currentAudioTrackIndex
+            }
 
             val finalTracks = audioTracks.map { it.toMap() }
             availableAudioTracks = finalTracks
             Log.d(TAG, "Found ${audioTracks.size} audio tracks")
+            ensureValidAudioSelection(finalTracks)
 
         } catch (e: Exception) {
             Log.e(TAG, "Error getting audio tracks", e)
         }
 
         return availableAudioTracks
+    }
+
+    private fun isAudioMimeAllowed(mimeType: String?): Boolean {
+        val canonical = AudioDecoderCapabilityDetector.canonicalize(mimeType) ?: return true
+        return if (audioDecoderPreferences.autoDetect) {
+            audioDecoderCapabilities[canonical] ?: when (canonical) {
+                "audio/aac", "audio/mp3" -> true
+                else -> false
+            }
+        } else {
+            when (canonical) {
+                "audio/ac3" -> audioDecoderPreferences.enableAc3
+                "audio/eac3" -> audioDecoderPreferences.enableEac3
+                "audio/dts" -> audioDecoderPreferences.enableDts
+                else -> true
+            }
+        }
+    }
+
+    private fun ensureValidAudioSelection(tracks: List<Map<String, Any?>>) {
+        if (isEnsuringAudioTrack) return
+        if (tracks.isEmpty()) {
+            currentAudioGroupIndex = -1
+            currentAudioTrackIndex = -1
+            return
+        }
+
+        val hasCurrent = tracks.any { track ->
+            (track["groupIndex"] as? Int == currentAudioGroupIndex) &&
+            (track["trackIndex"] as? Int == currentAudioTrackIndex)
+        }
+
+        if (hasCurrent) {
+            return
+        }
+
+        val fallback = tracks.firstOrNull { track ->
+            (track["groupIndex"] as? Int == lastSuccessfulAudioGroupIndex) &&
+            (track["trackIndex"] as? Int == lastSuccessfulAudioTrackIndex)
+        } ?: tracks.first()
+
+        val groupIndex = (fallback["groupIndex"] as? Int) ?: return
+        val trackIndex = (fallback["trackIndex"] as? Int) ?: return
+
+        isEnsuringAudioTrack = true
+        try {
+            selectAudioTrack(groupIndex, trackIndex)
+        } finally {
+            isEnsuringAudioTrack = false
+        }
     }
 
     private fun resolveLanguageDisplay(code: String?): String? {
@@ -644,6 +715,15 @@ class RobustExoPlayerController(
             return false
         }
 
+        val format = audioGroup.mediaTrackGroup.getFormat(trackIndex)
+        if (!isAudioMimeAllowed(format.sampleMimeType)) {
+            Log.w(TAG, "Blocked unsupported audio mime: ${format.sampleMimeType}")
+            mainScope.launch {
+                Toast.makeText(context, "This audio format is not supported on your device", Toast.LENGTH_SHORT).show()
+            }
+            return false
+        }
+
         val previousGroup = currentAudioGroupIndex
         val previousTrack = currentAudioTrackIndex
 
@@ -662,6 +742,10 @@ class RobustExoPlayerController(
 
             currentAudioGroupIndex = groupIndex
             currentAudioTrackIndex = trackIndex
+            previousSuccessfulAudioGroupIndex = lastSuccessfulAudioGroupIndex
+            previousSuccessfulAudioTrackIndex = lastSuccessfulAudioTrackIndex
+            lastSuccessfulAudioGroupIndex = groupIndex
+            lastSuccessfulAudioTrackIndex = trackIndex
 
             mainScope.launch {
                 _events.emit(

@@ -76,6 +76,10 @@ class _RobustVideoPlayerWidgetState
 
   bool _isPlaying = false;
 
+  bool _isUserScrubbing = false;
+  double? _scrubPreviewPositionMs;
+  bool _wasPlayingBeforeScrub = false;
+
   AppSettings? _settings;
 
   List<RobustAudioTrack> _audioTracks = const [];
@@ -138,7 +142,7 @@ class _RobustVideoPlayerWidgetState
   }
 
   void _handleVerticalGesture(DragUpdateDetails details) {
-    if (_isLocked) return;
+    if (_isLocked || _isUserScrubbing) return;
     final settings = _settings;
     if (settings == null) return;
 
@@ -154,7 +158,7 @@ class _RobustVideoPlayerWidgetState
   }
 
   void _handleHorizontalGesture(DragUpdateDetails details) {
-    if (_isLocked) return;
+    if (_isLocked || _isUserScrubbing) return;
     final settings = _settings;
     if (settings == null || !settings.enableGestureSeek) return;
 
@@ -194,7 +198,7 @@ class _RobustVideoPlayerWidgetState
   }
 
   void _prepareVerticalGesture(DragStartDetails details) {
-    if (_isLocked) return;
+    if (_isLocked || _isUserScrubbing) return;
     final settings = _settings;
     if (settings == null) return;
 
@@ -506,10 +510,16 @@ class _RobustVideoPlayerWidgetState
       }
       return;
     } else if (event is RobustPositionEvent) {
-      setState(() {
-        _position = event.position;
-        _duration = event.duration;
-      });
+      if (_isUserScrubbing) {
+        setState(() {
+          _duration = event.duration;
+        });
+      } else {
+        setState(() {
+          _position = event.position;
+          _duration = event.duration;
+        });
+      }
     } else if (event is RobustOrientationChangedEvent) {
       setState(() {
         _currentOrientation = event.orientation;
@@ -1271,11 +1281,17 @@ class _RobustVideoPlayerWidgetState
   }
 
   Widget _buildBottomBar() {
-    final positionLabel = _formatDuration(_position);
-    final durationLabel = _formatDuration(_duration);
     final durationMs = _duration.inMilliseconds.toDouble();
     final maxValue = math.max(durationMs, 1.0);
-    final positionMs = _position.inMilliseconds.toDouble().clamp(0.0, maxValue);
+    final effectivePositionMs = _isUserScrubbing
+        ? (_scrubPreviewPositionMs ?? _position.inMilliseconds.toDouble())
+        : _position.inMilliseconds.toDouble();
+    final clampedPositionMs = effectivePositionMs.clamp(0.0, maxValue);
+
+    final positionLabel = _formatDuration(
+      Duration(milliseconds: clampedPositionMs.round()),
+    );
+    final durationLabel = _formatDuration(_duration);
 
     return SafeArea(
       child: Padding(
@@ -1309,11 +1325,44 @@ class _RobustVideoPlayerWidgetState
                       child: Slider(
                         min: 0,
                         max: maxValue,
-                        value: positionMs,
+                        value: clampedPositionMs,
+                        onChangeStart: (value) {
+                          if (_isUserScrubbing) return;
+                          _isUserScrubbing = true;
+                          _scrubPreviewPositionMs = value;
+                          _wasPlayingBeforeScrub = _isPlaying;
+                          if (_isPlaying) {
+                            unawaited(_robustController.pause());
+                          }
+                          _hideControlsTimer?.cancel();
+                          _showGestureOverlay = false;
+                          _activeGesture = null;
+                          setState(() {});
+                        },
                         onChanged: (value) {
-                          _robustController.seekTo(
-                            Duration(milliseconds: value.round()),
-                          );
+                          if (!_isUserScrubbing) return;
+                          _scrubPreviewPositionMs = value;
+                          setState(() {});
+                        },
+                        onChangeEnd: (value) {
+                          if (!_isUserScrubbing) return;
+                          _isUserScrubbing = false;
+
+                          final target = Duration(milliseconds: value.round());
+                          _position = target;
+                          final resumePlayback = _wasPlayingBeforeScrub;
+                          _wasPlayingBeforeScrub = false;
+                          _scrubPreviewPositionMs = null;
+
+                          unawaited(() async {
+                            await _robustController.seekTo(target);
+                            if (resumePlayback) {
+                              await _robustController.play();
+                            }
+                          }());
+
+                          setState(() {});
+                          _restartHideControlsTimer();
                         },
                       ),
                     ),
@@ -1593,13 +1642,20 @@ class _OptionSheet<T> extends StatelessWidget {
             style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 16),
-          ...options.map(
-            (option) => ListTile(
-              title: Text(formatter(option)),
-              trailing: option == selected
-                  ? const Icon(Icons.check, color: Colors.blue)
-                  : null,
-              onTap: () => Navigator.of(context).pop(option),
+          Expanded(
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: options.length,
+              itemBuilder: (context, index) {
+                final option = options[index];
+                return ListTile(
+                  title: Text(formatter(option)),
+                  trailing: option == selected
+                      ? const Icon(Icons.check, color: Colors.blue)
+                      : null,
+                  onTap: () => Navigator.of(context).pop(option),
+                );
+              },
             ),
           ),
         ],
@@ -1626,18 +1682,25 @@ class _AudioTrackSheet extends StatelessWidget {
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 12),
-          ...tracks.map((track) {
-            return RadioListTile<RobustAudioTrack>(
-              value: track,
-              groupValue: selected,
-              onChanged: (_) => Navigator.of(context).pop(track),
-              title: Text(track.displayName),
-              subtitle: Text(track.languageDisplay),
-              secondary: track.channelDescription.isNotEmpty
-                  ? Text(track.channelDescription)
-                  : null,
-            );
-          }),
+          Expanded(
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: tracks.length,
+              itemBuilder: (context, index) {
+                final track = tracks[index];
+                return RadioListTile<RobustAudioTrack>(
+                  value: track,
+                  groupValue: selected,
+                  onChanged: (_) => Navigator.of(context).pop(track),
+                  title: Text(track.displayName),
+                  subtitle: Text(track.languageDisplay),
+                  secondary: track.channelDescription.isNotEmpty
+                      ? Text(track.channelDescription)
+                      : null,
+                );
+              },
+            ),
+          ),
         ],
       ),
     );
