@@ -9,7 +9,7 @@ class AppTheme {
       seedColor: data.accentColor,
       brightness: Brightness.light,
     );
-    return _baseTheme(colorScheme);
+    return _baseTheme(colorScheme, data);
   }
 
   static ThemeData dark(AppThemeData data) {
@@ -17,7 +17,7 @@ class AppTheme {
       seedColor: data.accentColor,
       brightness: Brightness.dark,
     );
-    return _baseTheme(colorScheme);
+    return _baseTheme(colorScheme, data);
   }
 
   static ThemeData amoled(AppThemeData data) {
@@ -29,21 +29,46 @@ class AppTheme {
       background: AppColors.amoledBackground,
       surface: AppColors.amoledSurface,
     );
-    return _baseTheme(amoledScheme).copyWith(
+    return _baseTheme(amoledScheme, data).copyWith(
       scaffoldBackgroundColor: AppColors.amoledBackground,
       colorScheme: amoledScheme,
-      appBarTheme: _appBarTheme(amoledScheme),
+      appBarTheme: _appBarTheme(amoledScheme, data),
       bottomNavigationBarTheme: _bottomNavigationTheme(amoledScheme),
       cardTheme: _cardTheme(amoledScheme),
     );
   }
 
-  static ThemeData _baseTheme(ColorScheme colorScheme) {
+  static ThemeData _baseTheme(ColorScheme colorScheme, AppThemeData data) {
+    var finalColorScheme = colorScheme;
+    var finalScaffoldColor = colorScheme.background;
+    var finalAppBarTheme = _appBarTheme(colorScheme, data);
+
+    if (data.style == ThemeStyle.ahs && data.ahsColor != null) {
+      final ahsColor = data.ahsColor!;
+      finalScaffoldColor = ahsColor;
+      finalColorScheme = colorScheme.copyWith(
+        background: ahsColor,
+        surface: ahsColor, // Assuming cards/surfaces also match
+        onBackground: ahsColor.computeLuminance() > 0.5
+            ? Colors.black
+            : Colors.white,
+        onSurface: ahsColor.computeLuminance() > 0.5
+            ? Colors.black
+            : Colors.white,
+      );
+      finalAppBarTheme = finalAppBarTheme.copyWith(
+        backgroundColor: ahsColor,
+        foregroundColor: ahsColor.computeLuminance() > 0.5
+            ? Colors.black
+            : Colors.white,
+      );
+    }
+
     return ThemeData(
       useMaterial3: true,
-      colorScheme: colorScheme,
-      scaffoldBackgroundColor: colorScheme.background,
-      appBarTheme: _appBarTheme(colorScheme),
+      colorScheme: finalColorScheme,
+      scaffoldBackgroundColor: finalScaffoldColor,
+      appBarTheme: finalAppBarTheme,
       bottomNavigationBarTheme: _bottomNavigationTheme(colorScheme),
       cardTheme: _cardTheme(colorScheme),
       elevatedButtonTheme: ElevatedButtonThemeData(
@@ -91,18 +116,38 @@ class AppTheme {
     );
   }
 
-  static AppBarTheme _appBarTheme(ColorScheme colorScheme) {
+  static AppBarTheme _appBarTheme(ColorScheme colorScheme, AppThemeData data) {
+    Color? backgroundColor = colorScheme.surface;
+    Color? foregroundColor = colorScheme.onSurface;
+
+    if (data.style == ThemeStyle.dynamic && data.headerColor != null) {
+      backgroundColor = data.headerColor;
+      // Calculate contrast color for content
+      if (backgroundColor!.computeLuminance() > 0.5) {
+        foregroundColor = Colors.black;
+      } else {
+        foregroundColor = Colors.white;
+      }
+    } else if (data.style == ThemeStyle.ahs && data.ahsColor != null) {
+      backgroundColor = data.ahsColor;
+      if (backgroundColor!.computeLuminance() > 0.5) {
+        foregroundColor = Colors.black;
+      } else {
+        foregroundColor = Colors.white;
+      }
+    }
+
     return AppBarTheme(
-      backgroundColor: colorScheme.surface,
-      foregroundColor: colorScheme.onSurface,
+      backgroundColor: backgroundColor,
+      foregroundColor: foregroundColor,
       elevation: 0,
       centerTitle: true,
       titleTextStyle: TextStyle(
-        color: colorScheme.onSurface,
+        color: foregroundColor,
         fontSize: 20,
         fontWeight: FontWeight.w600,
       ),
-      iconTheme: IconThemeData(color: colorScheme.onSurface),
+      iconTheme: IconThemeData(color: foregroundColor),
     );
   }
 

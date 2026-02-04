@@ -269,7 +269,7 @@ class _DetailedSettingsScreenState
         _buildSliderTile(
           title: 'Seek Duration',
           subtitle: '${(_settings.seekDuration / 1000).round()} seconds',
-          value: _settings.seekDuration.toDouble(),
+          value: (_settings.seekDuration / 1000).clamp(5.0, 60.0).toDouble(),
           min: 5,
           max: 60,
           divisions: 11,
@@ -284,6 +284,48 @@ class _DetailedSettingsScreenState
         ),
       ]),
       const SizedBox(height: 24),
+      _buildSection('Timeline Preview', [
+        _buildSwitchTile(
+          title: 'Frame Preview Thumbnail',
+          subtitle: 'Show floating video preview while scrubbing',
+          value: _settings.enableTimelinePreviewThumbnail,
+          onChanged: (value) =>
+              widget.onUpdate('timeline_preview_enabled', value),
+        ),
+        _buildSwitchTile(
+          title: 'Rounded Thumbnail',
+          subtitle: 'Apply rounded corners and soft shadow',
+          value: _settings.timelineRoundedThumbnail,
+          onChanged: (value) =>
+              widget.onUpdate('timeline_preview_rounded', value),
+          enabled: _settings.enableTimelinePreviewThumbnail,
+        ),
+        _buildSwitchTile(
+          title: 'Show Timestamp',
+          subtitle: 'Display time overlay on the preview bubble',
+          value: _settings.timelineShowTimestamp,
+          onChanged: (value) =>
+              widget.onUpdate('timeline_preview_timestamp', value),
+          enabled: _settings.enableTimelinePreviewThumbnail,
+        ),
+        _buildSwitchTile(
+          title: 'Smooth Animation',
+          subtitle: 'Fade the preview in and out smoothly',
+          value: _settings.timelineSmoothAnimation,
+          onChanged: (value) =>
+              widget.onUpdate('timeline_preview_animation', value),
+          enabled: _settings.enableTimelinePreviewThumbnail,
+        ),
+        _buildSwitchTile(
+          title: 'Fast Scrub Optimization',
+          subtitle: 'Skip intermediate frames when dragging quickly',
+          value: _settings.timelineFastScrubOptimization,
+          onChanged: (value) =>
+              widget.onUpdate('timeline_preview_fast_scrub', value),
+          enabled: _settings.enableTimelinePreviewThumbnail,
+        ),
+      ]),
+      const SizedBox(height: 24),
       _buildSection(AppStrings.gestureSettings, [
         _buildSwitchTile(
           title: 'Show Gesture Hints',
@@ -292,10 +334,10 @@ class _DetailedSettingsScreenState
           onChanged: (value) => widget.onUpdate('show_gestures_hints', value),
         ),
         _buildSwitchTile(
-          title: 'Auto Rotate',
-          subtitle: 'Automatically rotate on fullscreen',
-          value: _settings.autoRotate,
-          onChanged: (value) => widget.onUpdate('auto_rotate', value),
+          title: 'Always Rotate Video',
+          subtitle: 'Follow device orientation during playback',
+          value: _settings.autoRotateVideo,
+          onChanged: (value) => widget.onUpdate('auto_rotate_video', value),
         ),
         _buildSwitchTile(
           title: 'Seek Gestures',
@@ -543,13 +585,25 @@ class _DetailedSettingsScreenState
     required String subtitle,
     required bool value,
     required ValueChanged<bool> onChanged,
+    bool enabled = true,
   }) {
+    final theme = Theme.of(context);
+    final inactiveColor = theme.colorScheme.onSurface.withOpacity(0.4);
+
     return SwitchListTile(
-      title: Text(title),
-      subtitle: Text(subtitle),
+      title: Text(
+        title,
+        style: TextStyle(color: enabled ? null : inactiveColor),
+      ),
+      subtitle: Text(
+        subtitle,
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: enabled ? theme.textTheme.bodySmall?.color : inactiveColor,
+        ),
+      ),
       value: value,
-      onChanged: onChanged,
-      activeColor: Theme.of(context).colorScheme.primary,
+      onChanged: enabled ? onChanged : null,
+      activeColor: theme.colorScheme.primary,
     );
   }
 

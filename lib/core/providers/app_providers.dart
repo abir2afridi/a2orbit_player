@@ -21,17 +21,25 @@ final themeProvider = StateNotifierProvider<ThemeNotifier, AppThemeData>((ref) {
   return ThemeNotifier(ref);
 });
 
+enum ThemeStyle { normal, dynamic, ahs }
+
 class AppThemeData {
   final ThemeMode themeMode;
   final Color accentColor;
   final bool useDynamicColor;
   final bool useAmoled;
+  final ThemeStyle style;
+  final Color? headerColor;
+  final Color? ahsColor;
 
   const AppThemeData({
     this.themeMode = ThemeMode.system,
     this.accentColor = const Color(0xFF1976D2),
     this.useDynamicColor = true,
     this.useAmoled = false,
+    this.style = ThemeStyle.normal,
+    this.headerColor,
+    this.ahsColor,
   });
 
   AppThemeData copyWith({
@@ -39,12 +47,18 @@ class AppThemeData {
     Color? accentColor,
     bool? useDynamicColor,
     bool? useAmoled,
+    ThemeStyle? style,
+    Color? headerColor,
+    Color? ahsColor,
   }) {
     return AppThemeData(
       themeMode: themeMode ?? this.themeMode,
       accentColor: accentColor ?? this.accentColor,
       useDynamicColor: useDynamicColor ?? this.useDynamicColor,
       useAmoled: useAmoled ?? this.useAmoled,
+      style: style ?? this.style,
+      headerColor: headerColor ?? this.headerColor,
+      ahsColor: ahsColor ?? this.ahsColor,
     );
   }
 }
@@ -65,11 +79,18 @@ class ThemeNotifier extends StateNotifier<AppThemeData> {
     final useDynamicColor = _prefs.getBool('use_dynamic_color') ?? true;
     final useAmoled = _prefs.getBool('use_amoled_theme') ?? false;
 
+    final styleIndex = _prefs.getInt('theme_style') ?? 0;
+    final headerColorVal = _prefs.getInt('header_color');
+    final ahsColorVal = _prefs.getInt('ahs_color');
+
     state = AppThemeData(
       themeMode: ThemeMode.values[themeIndex],
       accentColor: Color(accentColorValue),
       useDynamicColor: useDynamicColor,
       useAmoled: useAmoled,
+      style: ThemeStyle.values[styleIndex],
+      headerColor: headerColorVal != null ? Color(headerColorVal) : null,
+      ahsColor: ahsColorVal != null ? Color(ahsColorVal) : null,
     );
   }
 
@@ -91,6 +112,29 @@ class ThemeNotifier extends StateNotifier<AppThemeData> {
   Future<void> setUseAmoled(bool useAmoled) async {
     state = state.copyWith(useAmoled: useAmoled);
     await _prefs.setBool('use_amoled_theme', useAmoled);
+  }
+
+  Future<void> setThemeStyle(ThemeStyle style) async {
+    state = state.copyWith(style: style);
+    await _prefs.setInt('theme_style', style.index);
+  }
+
+  Future<void> setHeaderColor(Color? color) async {
+    state = state.copyWith(headerColor: color);
+    if (color != null) {
+      await _prefs.setInt('header_color', color.value);
+    } else {
+      await _prefs.remove('header_color');
+    }
+  }
+
+  Future<void> setAhsColor(Color? color) async {
+    state = state.copyWith(ahsColor: color);
+    if (color != null) {
+      await _prefs.setInt('ahs_color', color.value);
+    } else {
+      await _prefs.remove('ahs_color');
+    }
   }
 }
 
@@ -309,7 +353,7 @@ class AppSettings {
   final int sleepTimerMinutes;
   final bool enableABRepeat;
   final bool showGesturesHints;
-  final bool autoRotate;
+  final bool autoRotateVideo;
   final bool gestureOneHandMode;
   final bool enableGestureSeek;
   final bool enableGestureBrightness;
@@ -322,6 +366,11 @@ class AppSettings {
   final String defaultSubtitleLanguage;
   final String defaultAudioLanguage;
   final bool enableHardwareAcceleration;
+  final bool enableTimelinePreviewThumbnail;
+  final bool timelineRoundedThumbnail;
+  final bool timelineShowTimestamp;
+  final bool timelineSmoothAnimation;
+  final bool timelineFastScrubOptimization;
 
   const AppSettings({
     this.themeMode = 'system',
@@ -335,7 +384,7 @@ class AppSettings {
     this.sleepTimerMinutes = 0,
     this.enableABRepeat = false,
     this.showGesturesHints = true,
-    this.autoRotate = true,
+    this.autoRotateVideo = true,
     this.gestureOneHandMode = false,
     this.enableGestureSeek = true,
     this.enableGestureBrightness = true,
@@ -348,6 +397,11 @@ class AppSettings {
     this.defaultSubtitleLanguage = 'en',
     this.defaultAudioLanguage = 'en',
     this.enableHardwareAcceleration = true,
+    this.enableTimelinePreviewThumbnail = true,
+    this.timelineRoundedThumbnail = true,
+    this.timelineShowTimestamp = true,
+    this.timelineSmoothAnimation = true,
+    this.timelineFastScrubOptimization = true,
   });
 
   AppSettings copyWith({
@@ -362,7 +416,7 @@ class AppSettings {
     int? sleepTimerMinutes,
     bool? enableABRepeat,
     bool? showGesturesHints,
-    bool? autoRotate,
+    bool? autoRotateVideo,
     bool? gestureOneHandMode,
     bool? enableGestureSeek,
     bool? enableGestureBrightness,
@@ -375,6 +429,11 @@ class AppSettings {
     String? defaultSubtitleLanguage,
     String? defaultAudioLanguage,
     bool? enableHardwareAcceleration,
+    bool? enableTimelinePreviewThumbnail,
+    bool? timelineRoundedThumbnail,
+    bool? timelineShowTimestamp,
+    bool? timelineSmoothAnimation,
+    bool? timelineFastScrubOptimization,
   }) {
     return AppSettings(
       themeMode: themeMode ?? this.themeMode,
@@ -389,7 +448,7 @@ class AppSettings {
       sleepTimerMinutes: sleepTimerMinutes ?? this.sleepTimerMinutes,
       enableABRepeat: enableABRepeat ?? this.enableABRepeat,
       showGesturesHints: showGesturesHints ?? this.showGesturesHints,
-      autoRotate: autoRotate ?? this.autoRotate,
+      autoRotateVideo: autoRotateVideo ?? this.autoRotateVideo,
       gestureOneHandMode: gestureOneHandMode ?? this.gestureOneHandMode,
       enableGestureSeek: enableGestureSeek ?? this.enableGestureSeek,
       enableGestureBrightness:
@@ -406,6 +465,16 @@ class AppSettings {
       defaultAudioLanguage: defaultAudioLanguage ?? this.defaultAudioLanguage,
       enableHardwareAcceleration:
           enableHardwareAcceleration ?? this.enableHardwareAcceleration,
+      enableTimelinePreviewThumbnail:
+          enableTimelinePreviewThumbnail ?? this.enableTimelinePreviewThumbnail,
+      timelineRoundedThumbnail:
+          timelineRoundedThumbnail ?? this.timelineRoundedThumbnail,
+      timelineShowTimestamp:
+          timelineShowTimestamp ?? this.timelineShowTimestamp,
+      timelineSmoothAnimation:
+          timelineSmoothAnimation ?? this.timelineSmoothAnimation,
+      timelineFastScrubOptimization:
+          timelineFastScrubOptimization ?? this.timelineFastScrubOptimization,
     );
   }
 }
@@ -421,6 +490,11 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
   Future<void> _loadSettings() async {
     _prefs = ref.read(sharedPreferencesProvider);
 
+    final legacyAutoRotate = _readBool('auto_rotate');
+    if (legacyAutoRotate != null && !_prefs.containsKey('auto_rotate_video')) {
+      await _prefs.setBool('auto_rotate_video', legacyAutoRotate);
+    }
+
     state = AppSettings(
       themeMode: _readString('theme_mode') ?? 'system',
       backgroundPlayOption: BackgroundPlayOptionX.fromKey(
@@ -435,7 +509,7 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
       sleepTimerMinutes: _readInt('sleep_timer_minutes') ?? 0,
       enableABRepeat: _readBool('enable_ab_repeat') ?? false,
       showGesturesHints: _readBool('show_gestures_hints') ?? true,
-      autoRotate: _readBool('auto_rotate') ?? true,
+      autoRotateVideo: _readBool('auto_rotate_video') ?? true,
       gestureOneHandMode: _readBool('gesture_one_hand') ?? false,
       enableGestureSeek: _readBool('gesture_seek') ?? true,
       enableGestureBrightness: _readBool('gesture_brightness') ?? true,
@@ -449,6 +523,13 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
       defaultSubtitleLanguage: _readString('default_subtitle_language') ?? 'en',
       defaultAudioLanguage: _readString('default_audio_language') ?? 'en',
       enableHardwareAcceleration: _readBool('hardware_acceleration') ?? true,
+      enableTimelinePreviewThumbnail:
+          _readBool('timeline_preview_enabled') ?? true,
+      timelineRoundedThumbnail: _readBool('timeline_preview_rounded') ?? true,
+      timelineShowTimestamp: _readBool('timeline_preview_timestamp') ?? true,
+      timelineSmoothAnimation: _readBool('timeline_preview_animation') ?? true,
+      timelineFastScrubOptimization:
+          _readBool('timeline_preview_fast_scrub') ?? true,
     );
   }
 
@@ -498,8 +579,8 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
         state = state.copyWith(showGesturesHints: value);
         await _prefs.setBool(key, value);
         break;
-      case 'auto_rotate':
-        state = state.copyWith(autoRotate: value);
+      case 'auto_rotate_video':
+        state = state.copyWith(autoRotateVideo: value);
         await _prefs.setBool(key, value);
         break;
       case 'gesture_one_hand':
@@ -548,6 +629,26 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
         break;
       case 'hardware_acceleration':
         state = state.copyWith(enableHardwareAcceleration: value);
+        await _prefs.setBool(key, value);
+        break;
+      case 'timeline_preview_enabled':
+        state = state.copyWith(enableTimelinePreviewThumbnail: value);
+        await _prefs.setBool(key, value);
+        break;
+      case 'timeline_preview_rounded':
+        state = state.copyWith(timelineRoundedThumbnail: value);
+        await _prefs.setBool(key, value);
+        break;
+      case 'timeline_preview_timestamp':
+        state = state.copyWith(timelineShowTimestamp: value);
+        await _prefs.setBool(key, value);
+        break;
+      case 'timeline_preview_animation':
+        state = state.copyWith(timelineSmoothAnimation: value);
+        await _prefs.setBool(key, value);
+        break;
+      case 'timeline_preview_fast_scrub':
+        state = state.copyWith(timelineFastScrubOptimization: value);
         await _prefs.setBool(key, value);
         break;
     }

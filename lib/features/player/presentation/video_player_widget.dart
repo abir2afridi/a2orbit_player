@@ -165,11 +165,11 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget>
   void _applySettings(AppSettings settings) {
     _settings = settings;
     _isAudioOnly = settings.audioOnly;
-    _updateOrientationPreference(settings.autoRotate);
+    _updateOrientationPreference(settings.autoRotateVideo);
   }
 
-  void _updateOrientationPreference(bool autoRotate) {
-    final orientations = autoRotate
+  void _updateOrientationPreference(bool autoRotateVideo) {
+    final orientations = autoRotateVideo
         ? DeviceOrientation.values
         : const [DeviceOrientation.portraitUp];
     SystemChrome.setPreferredOrientations(orientations);

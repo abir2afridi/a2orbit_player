@@ -27,7 +27,9 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
+import android.media.MediaMetadataRetriever
 import androidx.media3.exoplayer.SeekParameters
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.common.Format
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
@@ -53,12 +55,15 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileInputStream
 import java.io.IOException
+import java.io.ByteArrayOutputStream
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -125,6 +130,7 @@ class RobustExoPlayerController(
     private var playerView: PlayerView? = null
     private var currentMediaItem: MediaItem? = null
     private var currentUri: Uri? = null
+    private var currentSourcePath: String? = null
     private var reportingJob: Job? = null
     private var initializationAttempts = 0
     private val maxInitializationAttempts = 3
@@ -173,10 +179,232 @@ class RobustExoPlayerController(
     private var currentOrientation: Int = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
     private var isAutoRotateEnabled: Boolean = true
     private var isOrientationLocked: Boolean = false
+    private var lastAspectMode: String = "default"
+    private var lastCustomAspectRatio: Float? = null
 
     // Event flow for communication with Flutter
     private val _events = MutableSharedFlow<PlayerEvent>(extraBufferCapacity = 32)
     val events: SharedFlow<PlayerEvent> = _events
+
+    // Timeline preview support
+    private val timelineLock = Any()
+    private var timelineRetriever: MediaMetadataRetriever? = null
+    private var timelinePreparedUri: Uri? = null
+    private var timelinePreparedSourcePath: String? = null
+    private var timelineDurationMs: Long = -1L
+    private var timelineLastError: String? = null
+
+    private fun resetTimelineRetriever() {
+        synchronized(timelineLock) {
+            timelineRetriever?.release()
+            timelineRetriever = null
+            timelinePreparedUri = null
+            timelinePreparedSourcePath = null
+            timelineDurationMs = -1L
+            timelineLastError = null
+        }
+    }
+
+    private fun prepareTimelineRetrieverAsync() {
+        val uri = currentUri
+        val sourcePath = currentSourcePath
+        if (uri == null && sourcePath.isNullOrBlank()) {
+            Log.w(TAG, "Timeline retriever skipped - no source available")
+            return
+        }
+        mainScope.launch(Dispatchers.IO) {
+            ensureTimelineRetrieverPrepared()
+        }
+    }
+
+    private fun ensureTimelineRetrieverPrepared(): Boolean {
+        val uri = currentUri
+        val sourcePath = currentSourcePath
+        synchronized(timelineLock) {
+            val existing = timelineRetriever
+            if (existing != null && timelinePreparedUri == uri && timelinePreparedSourcePath == sourcePath) {
+                return true
+            }
+
+            timelineRetriever?.release()
+            timelineRetriever = null
+            timelinePreparedUri = null
+            timelinePreparedSourcePath = null
+            timelineDurationMs = -1L
+
+            val retriever = MediaMetadataRetriever()
+            return try {
+                when {
+                    uri != null && uri.scheme == "content" -> {
+                        retriever.setDataSource(appContext, uri)
+                    }
+                    !sourcePath.isNullOrBlank() -> {
+                        retriever.setDataSource(sourcePath)
+                    }
+                    uri != null -> {
+                        retriever.setDataSource(uri.toString())
+                    }
+                    else -> {
+                        Log.w(TAG, "Timeline retriever missing both URI and path")
+                        retriever.release()
+                        false
+                    }
+                }
+
+                val durationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                val videoWidthStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+                val videoHeightStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+
+                val durationMs = durationStr?.toLongOrNull() ?: -1L
+                val videoWidth = videoWidthStr?.toIntOrNull() ?: -1
+                val videoHeight = videoHeightStr?.toIntOrNull() ?: -1
+
+                if (videoWidth <= 0 || videoHeight <= 0) {
+                    Log.e(TAG, "Timeline retriever invalid video dimensions: ${videoWidth}x${videoHeight}")
+                    retriever.release()
+                    timelineLastError = "invalid_dimensions"
+                    false
+                } else {
+                    timelineRetriever = retriever
+                    timelinePreparedUri = uri
+                    timelinePreparedSourcePath = sourcePath
+                    timelineDurationMs = durationMs
+                    timelineLastError = null
+                    Log.d(TAG, "Timeline retriever prepared (duration=${durationMs}ms, size=${videoWidth}x${videoHeight})")
+                    true
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error preparing timeline retriever", e)
+                timelineLastError = e.message
+                retriever.release()
+                false
+            }
+        }
+    }
+
+    private suspend fun extractTimelineFrame(
+        positionMs: Long,
+        maxWidth: Int,
+        maxHeight: Int,
+        quality: Int,
+    ): Map<String, Any?> {
+        return withContext(Dispatchers.IO) {
+            if (!ensureTimelineRetrieverPrepared()) {
+                return@withContext mapOf(
+                    "success" to false,
+                    "positionMs" to positionMs,
+                    "error" to (timelineLastError ?: "retriever_not_ready"),
+                )
+            }
+
+            val retriever = timelineRetriever
+            if (retriever == null) {
+                return@withContext mapOf(
+                    "success" to false,
+                    "positionMs" to positionMs,
+                    "error" to "retriever_null",
+                )
+            }
+
+            val duration = if (timelineDurationMs > 0) timelineDurationMs else {
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: -1L
+            }
+
+            val clampedPosition = when {
+                duration > 0 -> positionMs.coerceIn(0L, duration)
+                positionMs < 0L -> 0L
+                else -> positionMs
+            }
+
+            val frameTimeUs = clampedPosition * 1000L
+            Log.d(TAG, "Frame extraction started @${clampedPosition}ms (us=$frameTimeUs)")
+
+            try {
+                val bitmap = retriever.getFrameAtTime(
+                    frameTimeUs,
+                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                )
+
+                if (bitmap == null) {
+                    Log.w(TAG, "Frame extraction failed: bitmap null @${clampedPosition}ms")
+                    return@withContext mapOf(
+                        "success" to false,
+                        "positionMs" to clampedPosition,
+                        "error" to "bitmap_null",
+                    )
+                }
+
+                val clampQuality = quality.coerceIn(0, 100)
+
+                val scaleRequired = maxWidth > 0 && maxHeight > 0 &&
+                    (bitmap.width > maxWidth || bitmap.height > maxHeight)
+
+                val processedBitmap = if (scaleRequired) {
+                    val scale = min(
+                        maxWidth.toFloat() / bitmap.width.toFloat(),
+                        maxHeight.toFloat() / bitmap.height.toFloat(),
+                    )
+                    val targetWidth = max(1, (bitmap.width * scale).toInt())
+                    val targetHeight = max(1, (bitmap.height * scale).toInt())
+                    Bitmap.createScaledBitmap(bitmap, targetWidth, targetHeight, true).also {
+                        if (it != bitmap) {
+                            bitmap.recycle()
+                        }
+                    }
+                } else {
+                    bitmap
+                }
+
+                val outputStream = ByteArrayOutputStream()
+                processedBitmap.compress(Bitmap.CompressFormat.JPEG, clampQuality, outputStream)
+                val bytes = outputStream.toByteArray()
+                outputStream.close()
+
+                val frameWidth = processedBitmap.width
+                val frameHeight = processedBitmap.height
+
+                processedBitmap.recycle()
+
+                Log.d(TAG, "Frame extracted successfully @${clampedPosition}ms size=${frameWidth}x${frameHeight} bytes=${bytes.size}")
+
+                return@withContext mapOf(
+                    "success" to true,
+                    "positionMs" to clampedPosition,
+                    "durationMs" to duration,
+                    "width" to frameWidth,
+                    "height" to frameHeight,
+                    "bytes" to bytes,
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Frame extraction failed @${clampedPosition}ms", e)
+                return@withContext mapOf(
+                    "success" to false,
+                    "positionMs" to clampedPosition,
+                    "error" to (e.message ?: "extraction_error"),
+                )
+            }
+        }
+    }
+
+    fun getTimelinePreview(
+        positionMs: Long,
+        maxWidth: Int,
+        maxHeight: Int,
+        quality: Int,
+    ): Map<String, Any?> {
+        return try {
+            runBlocking {
+                extractTimelineFrame(positionMs, maxWidth, maxHeight, quality)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Timeline preview request failed", e)
+            mapOf(
+                "success" to false,
+                "positionMs" to positionMs,
+                "error" to (e.message ?: "timeline_error"),
+            )
+        }
+    }
     
     /**
      * Emit event from external sources (like gesture handlers)
@@ -1317,8 +1545,8 @@ class RobustExoPlayerController(
             "LANDSCAPE" -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
             "REVERSE_PORTRAIT" -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
             "REVERSE_LANDSCAPE" -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
-            "SENSOR" -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR
-            "AUTO" -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            "SENSOR",
+            "AUTO" -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR
             else -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
         
@@ -1441,6 +1669,7 @@ class RobustExoPlayerController(
         view.player = player
         view.useController = false // We use custom controls
         playerView?.resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+        applyAspectModeInternal()
         Log.d(TAG, "PlayerView attached to ExoPlayer")
     }
 
@@ -1449,11 +1678,15 @@ class RobustExoPlayerController(
      */
     fun setVideoSource(videoPath: String, subtitlePaths: List<String> = emptyList()) {
         Log.d(TAG, "Setting video source: $videoPath")
-        
+
+        currentSourcePath = videoPath
+
         if (videoPath.isBlank()) {
             emitError("INVALID_SOURCE", "Video path is empty")
             return
         }
+
+        resetTimelineRetriever()
 
         // Check permissions first
         if (!hasStoragePermission()) {
@@ -1469,10 +1702,12 @@ class RobustExoPlayerController(
         }
 
         currentUri = resolvedUri
+        currentSourcePath = videoPath
         initializationAttempts = 0
-        
+
         // Initialize with proper error handling
         initializePlayback(resolvedUri, videoPath, subtitlePaths)
+        prepareTimelineRetrieverAsync()
     }
 
     /**
@@ -1810,12 +2045,78 @@ class RobustExoPlayerController(
 
     fun setAspectRatio(resizeMode: Int) {
         try {
-            player.videoScalingMode = resizeMode
-            playerView?.resizeMode = resizeMode
-            Log.d(TAG, "Aspect ratio set to: $resizeMode")
+            when (resizeMode) {
+                AspectRatioFrameLayout.RESIZE_MODE_FILL -> {
+                    lastAspectMode = "stretch"
+                    lastCustomAspectRatio = null
+                }
+                AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> {
+                    lastAspectMode = "crop"
+                    lastCustomAspectRatio = null
+                }
+                else -> {
+                    lastAspectMode = "fit"
+                    lastCustomAspectRatio = null
+                }
+            }
+            applyAspectModeInternal()
+            mainScope.launch {
+                _events.emit(PlayerEvent.AspectModeChanged(lastAspectMode, lastCustomAspectRatio?.toDouble()))
+            }
+            Log.d(TAG, "Aspect ratio set to: $resizeMode -> $lastAspectMode")
         } catch (e: Exception) {
             Log.e(TAG, "Error setting aspect ratio", e)
             emitError("ASPECT_ERROR", "Failed to set aspect ratio: ${e.message}")
+        }
+    }
+
+    fun applyAspectMode(mode: String, ratio: Double?) {
+        lastAspectMode = mode
+        lastCustomAspectRatio = ratio?.toFloat()
+        applyAspectModeInternal()
+        mainScope.launch {
+            _events.emit(PlayerEvent.AspectModeChanged(lastAspectMode, lastCustomAspectRatio?.toDouble()))
+        }
+        Log.d(TAG, "Applied aspect mode: $mode ratio=${ratio ?: "-"}")
+    }
+
+    private fun applyAspectModeInternal() {
+        val mode = lastAspectMode
+        val ratio = lastCustomAspectRatio
+        val contentFrame = playerView?.findViewById<AspectRatioFrameLayout>(androidx.media3.ui.R.id.exo_content_frame)
+
+        when (mode) {
+            "original" -> {
+                player.videoScalingMode = C.VIDEO_SCALING_MODE_DEFAULT
+                playerView?.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FIT)
+                contentFrame?.setAspectRatio(0f)
+            }
+            "fit", "default" -> {
+                player.videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT
+                playerView?.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FIT)
+                contentFrame?.setAspectRatio(0f)
+            }
+            "stretch" -> {
+                player.videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT
+                playerView?.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FILL)
+                contentFrame?.setAspectRatio(0f)
+            }
+            "crop" -> {
+                player.videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING
+                playerView?.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_ZOOM)
+                contentFrame?.setAspectRatio(0f)
+            }
+            "ratio" -> {
+                player.videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT
+                playerView?.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FIT)
+                val safeRatio = ratio?.takeIf { it > 0f } ?: 0f
+                contentFrame?.setAspectRatio(safeRatio)
+            }
+            else -> {
+                player.videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT
+                playerView?.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FIT)
+                contentFrame?.setAspectRatio(0f)
+            }
         }
     }
 
@@ -1912,6 +2213,7 @@ class RobustExoPlayerController(
         reportingJob?.cancel()
         player.removeListener(this)
         player.release()
+        resetTimelineRetriever()
         playerView?.player = null
     }
 
@@ -1948,6 +2250,7 @@ class RobustExoPlayerController(
         data class AutoRotateChanged(val enabled: Boolean) : PlayerEvent
         data class OrientationLockChanged(val locked: Boolean) : PlayerEvent
         data class DeviceOrientationChanged(val orientation: String) : PlayerEvent
+        data class AspectModeChanged(val mode: String, val ratio: Double?) : PlayerEvent
     }
 
     // Additional utility methods can be added here as needed

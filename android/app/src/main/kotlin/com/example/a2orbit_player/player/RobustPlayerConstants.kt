@@ -50,6 +50,8 @@ object RobustPlayerConstants {
         const val GET_CURRENT_AUDIO_TRACK = "getCurrentAudioTrack"
         const val SET_AUDIO_DECODER_PREFERENCES = "setAudioDecoderPreferences"
         const val GET_AUDIO_DECODER_CAPABILITIES = "getAudioDecoderCapabilities"
+        const val GET_TIMELINE_PREVIEW = "getTimelinePreview"
+        const val APPLY_ASPECT_MODE = "applyAspectMode"
     }
     
     // Error codes

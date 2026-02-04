@@ -231,6 +231,12 @@ class RobustPlayerManager(
                 "viewId" to viewId,
                 "enabled" to event.enabled
             )
+            is RobustExoPlayerController.PlayerEvent.AspectModeChanged -> mapOf(
+                "type" to "aspectModeChanged",
+                "viewId" to viewId,
+                "mode" to event.mode,
+                "ratio" to event.ratio
+            )
             is RobustExoPlayerController.PlayerEvent.OrientationLockChanged -> mapOf(
                 "type" to "orientationLockChanged",
                 "viewId" to viewId,
@@ -273,6 +279,10 @@ class RobustPlayerManager(
 
     fun setAspectRatio(viewId: Int, resizeMode: Int) {
         getController(viewId)?.setAspectRatio(resizeMode)
+    }
+
+    fun applyAspectMode(viewId: Int, mode: String, ratio: Double?) {
+        getController(viewId)?.applyAspectMode(mode, ratio)
     }
 
     fun getVideoInformation(viewId: Int): Map<String, Any?>? {
@@ -329,7 +339,17 @@ class RobustPlayerManager(
     fun resetGestureStates(viewId: Int) {
         getController(viewId)?.resetGestureStates()
     }
-    
+
+    fun getTimelinePreview(
+        viewId: Int,
+        positionMs: Long,
+        maxWidth: Int,
+        maxHeight: Int,
+        quality: Int,
+    ): Map<String, Any?>? {
+        return getController(viewId)?.getTimelinePreview(positionMs, maxWidth, maxHeight, quality)
+    }
+
     fun loadSubtitles(viewId: Int, subtitlePaths: List<String>) {
         getController(viewId)?.loadSubtitles(subtitlePaths)
     }

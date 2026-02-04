@@ -128,6 +128,17 @@ class RobustMainActivity : FlutterActivity() {
                     result.success(null)
                 }
 
+                RobustPlayerConstants.Methods.APPLY_ASPECT_MODE -> {
+                    val mode = call.argument<String>("mode")
+                    val ratio = call.argument<Number>("ratio")?.toDouble()
+                    if (viewId == null || mode.isNullOrBlank()) {
+                        result.error("invalid_args", "viewId and mode required", null)
+                        return
+                    }
+                    manager.applyAspectMode(viewId, mode, ratio)
+                    result.success(null)
+                }
+
                 RobustPlayerConstants.Methods.SET_ORIENTATION -> {
                     val orientation = call.argument<String>("orientation")
                     if (viewId == null || orientation.isNullOrBlank()) {
@@ -315,7 +326,33 @@ class RobustMainActivity : FlutterActivity() {
                     manager.resetGestureStates(viewId)
                     result.success(null)
                 }
-                
+
+                RobustPlayerConstants.Methods.GET_TIMELINE_PREVIEW -> {
+                    val position = call.argument<Number>("position")?.toLong()
+                    val maxWidth = call.argument<Number>("maxWidth")?.toInt()
+                    val maxHeight = call.argument<Number>("maxHeight")?.toInt()
+                    val quality = call.argument<Number>("quality")?.toInt()
+
+                    if (viewId == null || position == null || maxWidth == null || maxHeight == null || quality == null) {
+                        result.error(
+                            "invalid_args",
+                            "viewId, position, maxWidth, maxHeight, quality required",
+                            null,
+                        )
+                        return
+                    }
+
+                    val preview = manager.getTimelinePreview(
+                        viewId,
+                        position,
+                        maxWidth,
+                        maxHeight,
+                        quality,
+                    )
+
+                    result.success(preview)
+                }
+
                 RobustPlayerConstants.Methods.DISPOSE -> {
                     if (viewId != null) {
                         manager.unregisterView(viewId)

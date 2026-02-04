@@ -1,5 +1,4 @@
 import 'dart:async';
-
 import 'package:flutter/services.dart';
 
 /// Robust Dart-side bridge to the native ExoPlayer implementation
@@ -83,6 +82,13 @@ class RobustPlayerController {
   Future<void> setGesturesEnabled(bool enabled) async =>
       _invoke<void>('enableGestures', {'enabled': enabled});
 
+  Future<void> applyAspectMode(String mode, {double? ratio}) async {
+    await _invoke<void>('applyAspectMode', {
+      'mode': mode,
+      if (ratio != null) 'ratio': ratio,
+    });
+  }
+
   Future<double?> setPlayerBrightness(double brightness) async =>
       _invoke<double>('setPlayerBrightness', {'brightness': brightness});
 
@@ -111,6 +117,22 @@ class RobustPlayerController {
 
   Future<void> resetGestureStates() async =>
       _invoke<void>('resetGestureStates');
+
+  Future<Map<String, dynamic>?> getTimelinePreview({
+    required int positionMs,
+    required int maxWidth,
+    required int maxHeight,
+    required int quality,
+  }) async {
+    final result = await _invoke<Map<dynamic, dynamic>>('getTimelinePreview', {
+      'position': positionMs,
+      'maxWidth': maxWidth,
+      'maxHeight': maxHeight,
+      'quality': quality,
+    });
+    if (result == null) return null;
+    return result.map((key, value) => MapEntry(key?.toString() ?? '', value));
+  }
 
   Future<Map<String, dynamic>?> getVideoInformation() async {
     final result = await _invoke<Map<dynamic, dynamic>>('getVideoInformation');
@@ -382,6 +404,11 @@ class RobustPlayerController {
         final orientation = event['orientation'] as String? ?? 'UNKNOWN';
         _eventController.add(RobustDeviceOrientationChangedEvent(orientation));
         break;
+      case 'aspectModeChanged':
+        final mode = event['mode']?.toString() ?? 'default';
+        final ratio = (event['ratio'] as num?)?.toDouble();
+        _eventController.add(RobustAspectModeChangedEvent(mode, ratio));
+        break;
       default:
         break;
     }
@@ -547,6 +574,13 @@ class RobustDeviceOrientationChangedEvent extends RobustPlayerEvent {
   const RobustDeviceOrientationChangedEvent(this.orientation);
 
   final String orientation;
+}
+
+class RobustAspectModeChangedEvent extends RobustPlayerEvent {
+  const RobustAspectModeChangedEvent(this.mode, this.ratio);
+
+  final String mode;
+  final double? ratio;
 }
 
 class RobustAudioTrack {
