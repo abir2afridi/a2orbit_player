@@ -414,8 +414,6 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
             color: Theme.of(context).colorScheme.onSurface,
           ),
         ),
-        backgroundColor: Theme.of(context).colorScheme.surface,
-        foregroundColor: Theme.of(context).colorScheme.onSurface,
         elevation: 0,
         actions: [
           IconButton(

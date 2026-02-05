@@ -60,7 +60,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       appBar: hideDefaultAppBar
           ? null
           : AppBar(
-              backgroundColor: Theme.of(context).colorScheme.surface,
               elevation: 0,
               title: _isSearching
                   ? TextField(

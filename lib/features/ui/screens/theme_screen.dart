@@ -1,9 +1,37 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/providers/app_providers.dart';
 
 class ThemeScreen extends ConsumerWidget {
   const ThemeScreen({super.key});
+
+  void _showColorPicker(BuildContext context, Function(Color) onColorSelected) {
+    Color pickerColor = Colors.blue;
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Pick a color!'),
+        content: SingleChildScrollView(
+          child: ColorPicker(
+            pickerColor: pickerColor,
+            onColorChanged: (color) {
+              pickerColor = color;
+            },
+          ),
+        ),
+        actions: <Widget>[
+          ElevatedButton(
+            child: const Text('Got it'),
+            onPressed: () {
+              onColorSelected(pickerColor);
+              Navigator.of(context).pop();
+            },
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -111,6 +139,7 @@ class ThemeScreen extends ConsumerWidget {
             ),
             const SizedBox(height: 12),
             _buildColorGrid(
+              context: context,
               colors: colors,
               selectedColor: themeData.style == ThemeStyle.normal
                   ? themeData.accentColor
@@ -132,6 +161,7 @@ class ThemeScreen extends ConsumerWidget {
             ),
             const SizedBox(height: 12),
             _buildTwoToneGrid(
+              context: context,
               colors: colors,
               selectedColor: themeData.style == ThemeStyle.dynamic
                   ? themeData.headerColor
@@ -141,10 +171,6 @@ class ThemeScreen extends ConsumerWidget {
                 themeNotifier.setThemeStyle(ThemeStyle.dynamic);
                 themeNotifier.setHeaderColor(color);
                 themeNotifier.setAhsColor(null);
-                // Maybe keep existing accent? Or update it too?
-                // User said "Dynamic er kaj holo only header er color change kora"
-                // So we might leave accent color alone or sync it.
-                // Let's assume we update accent color too for consistency in other widgets
                 themeNotifier.setAccentColor(color);
               },
             ),
@@ -158,6 +184,7 @@ class ThemeScreen extends ConsumerWidget {
             ),
             const SizedBox(height: 12),
             _buildColorGrid(
+              context: context,
               colors: colors,
               selectedColor: themeData.style == ThemeStyle.ahs
                   ? themeData.ahsColor
@@ -262,6 +289,7 @@ class ThemeScreen extends ConsumerWidget {
   }
 
   Widget _buildColorGrid({
+    required BuildContext context,
     required List<Color> colors,
     required Color? selectedColor,
     required Function(Color) onColorSelected,
@@ -275,8 +303,29 @@ class ThemeScreen extends ConsumerWidget {
         crossAxisSpacing: 12,
         childAspectRatio: 1,
       ),
-      itemCount: colors.length,
+      itemCount: colors.length + 1, // Add one for the picker icon
       itemBuilder: (context, index) {
+        if (index == colors.length) {
+          // Color Picker Button
+          return GestureDetector(
+            onTap: () => _showColorPicker(context, onColorSelected),
+            child: Container(
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceVariant,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: Theme.of(context).dividerColor,
+                  width: 1,
+                ),
+              ),
+              child: Icon(
+                Icons.add,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+            ),
+          );
+        }
+
         final color = colors[index];
         final isSelected = selectedColor?.value == color.value;
 
@@ -306,6 +355,7 @@ class ThemeScreen extends ConsumerWidget {
   }
 
   Widget _buildTwoToneGrid({
+    required BuildContext context,
     required List<Color> colors,
     required Color? selectedColor,
     required Color baseColor,
@@ -320,8 +370,29 @@ class ThemeScreen extends ConsumerWidget {
         crossAxisSpacing: 12,
         childAspectRatio: 1,
       ),
-      itemCount: colors.length,
+      itemCount: colors.length + 1, // Add picker
       itemBuilder: (context, index) {
+        if (index == colors.length) {
+          // Color Picker Button
+          return GestureDetector(
+            onTap: () => _showColorPicker(context, onColorSelected),
+            child: Container(
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceVariant,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: Theme.of(context).dividerColor,
+                  width: 1,
+                ),
+              ),
+              child: Icon(
+                Icons.add,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+            ),
+          );
+        }
+
         final color = colors[index];
         final isSelected = selectedColor?.value == color.value;
 
