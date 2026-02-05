@@ -4,7 +4,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/services/folder_scan_service.dart';
+import '../../../core/services/media_store_service.dart';
 import '../../../core/utils/permission_helper.dart';
 import '../models/file_view_settings.dart';
 import '../providers/file_settings_provider.dart';
@@ -37,9 +37,13 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
   @override
   void initState() {
     super.initState();
+
+    // Show UI immediately, scan in background after first frame
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _initializePermissionFlow();
+        // Trigger background scan after UI is shown
+        _loadFoldersInBackground();
       }
     });
   }
@@ -53,6 +57,17 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
   }
 
   Future<void> _initializePermissionFlow() async {
+    // Show cached data immediately if available
+    final cached = MediaStoreService.getCachedFolders();
+    if (cached.isNotEmpty && mounted) {
+      setState(() {
+        _foldersWithVideos = cached;
+        _filteredFolderPaths = cached.keys.toList();
+        _allFiles = cached.values.expand((e) => e).toList();
+        _isLoading = false;
+      });
+    }
+
     final hasPermission = await PermissionHelper.checkStoragePermissions();
 
     if (!mounted) return;
@@ -67,44 +82,12 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
       await _showPermissionGateDialog();
       return;
     }
-
-    await _loadFolders();
   }
 
-  Future<void> _loadFolders({bool forceRefresh = false}) async {
-    final cached = FolderScanService.getCachedFolders();
-    final hasCachedData = cached.isNotEmpty;
-
-    if (mounted) {
-      setState(() {
-        if (hasCachedData && !forceRefresh) {
-          _foldersWithVideos = cached;
-          _filteredFolderPaths = cached.keys.toList();
-          _isLoading = false;
-        } else {
-          _isLoading = true;
-        }
-        _isRefreshing = true;
-      });
-    }
-
+  Future<void> _loadFoldersInBackground() async {
+    // Load folders in background without blocking UI
     try {
-      final hasPermission = await PermissionHelper.checkStoragePermissions();
-
-      if (!hasPermission) {
-        if (mounted) {
-          setState(() {
-            _isRefreshing = false;
-            _isLoading = _foldersWithVideos.isEmpty;
-          });
-        }
-        await _showPermissionGateDialog();
-        return;
-      }
-
-      final foldersWithVideos = await FolderScanService.scanFoldersWithVideos(
-        forceRefresh: forceRefresh,
-      );
+      final foldersWithVideos = await MediaStoreService.scanFoldersWithVideos();
 
       if (mounted) {
         setState(() {
@@ -117,7 +100,9 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
       }
     } catch (e) {
       debugPrint('Error scanning folders: $e');
-      _showErrorDialog('Failed to scan folders. Please try again.');
+      if (mounted) {
+        _showErrorDialog('Failed to scan folders. Please try again.');
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -128,6 +113,14 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
     }
   }
 
+  Future<void> _loadFolders({bool forceRefresh = false}) async {
+    // For manual refresh, clear cache and reload
+    if (forceRefresh) {
+      MediaStoreService.clearCache();
+      await _loadFoldersInBackground();
+    }
+  }
+
   void _applySettings() {
     final settings = ref.read(fileSettingsProvider);
     final query = _searchQuery.toLowerCase();
@@ -135,7 +128,7 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
     // 1. Filter folders
     List<String> folderPaths = _foldersWithVideos.keys.where((path) {
       if (query.isEmpty) return true;
-      return FolderScanService.getFolderName(
+      return MediaStoreService.getFolderName(
         path,
       ).toLowerCase().contains(query);
     }).toList();
@@ -174,8 +167,8 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
           cmp = a.compareTo(b);
           break;
         default: // title
-          cmp = FolderScanService.getFolderName(a).toLowerCase().compareTo(
-            FolderScanService.getFolderName(b).toLowerCase(),
+          cmp = MediaStoreService.getFolderName(a).toLowerCase().compareTo(
+            MediaStoreService.getFolderName(b).toLowerCase(),
           );
       }
       return settings.isAscending ? cmp : -cmp;
@@ -224,7 +217,7 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
 
   void _navigateToVideoList(String folderPath) {
     final videos = _foldersWithVideos[folderPath] ?? [];
-    final folderName = FolderScanService.getFolderName(folderPath);
+    final folderName = MediaStoreService.getFolderName(folderPath);
 
     Navigator.push(
       context,
@@ -346,7 +339,8 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
     if (!mounted) return;
 
     if (granted) {
-      await _loadFolders(forceRefresh: true);
+      // Load folders after permission is granted
+      await _loadFoldersInBackground();
     } else {
       await _showPermissionGateDialog();
     }
@@ -494,12 +488,12 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
   }
 
   Widget _buildFolderListItem(String folderPath) {
-    final folderName = FolderScanService.getFolderName(folderPath);
-    final videoCount = FolderScanService.getVideoCount(
+    final folderName = MediaStoreService.getFolderName(folderPath);
+    final videoCount = MediaStoreService.getVideoCount(
       _foldersWithVideos,
       folderPath,
     );
-    final firstVideo = FolderScanService.getFirstVideo(
+    final firstVideo = MediaStoreService.getFirstVideo(
       _foldersWithVideos,
       folderPath,
     );
@@ -592,12 +586,12 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
   }
 
   Widget _buildFolderGridItem(String folderPath) {
-    final folderName = FolderScanService.getFolderName(folderPath);
-    final videoCount = FolderScanService.getVideoCount(
+    final folderName = MediaStoreService.getFolderName(folderPath);
+    final videoCount = MediaStoreService.getVideoCount(
       _foldersWithVideos,
       folderPath,
     );
-    final firstVideo = FolderScanService.getFirstVideo(
+    final firstVideo = MediaStoreService.getFirstVideo(
       _foldersWithVideos,
       folderPath,
     );

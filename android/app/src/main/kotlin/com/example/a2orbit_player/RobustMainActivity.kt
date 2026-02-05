@@ -4,6 +4,7 @@ import androidx.lifecycle.LifecycleOwner
 import com.example.a2orbit_player.player.RobustPlayerFactory
 import com.example.a2orbit_player.player.RobustPlayerManager
 import com.example.a2orbit_player.player.RobustPlayerConstants
+import com.a2orbit.player.MediaStorePlugin
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -22,6 +23,9 @@ class RobustMainActivity : FlutterActivity() {
         
         val lifecycle = this as? LifecycleOwner
         robustManager = RobustPlayerManager(this, lifecycle)
+
+        // Register MediaStore plugin for video discovery
+        MediaStorePlugin.setup(this, flutterEngine)
 
         // Register platform view factory
         val registry = flutterEngine.platformViewsController.registry
