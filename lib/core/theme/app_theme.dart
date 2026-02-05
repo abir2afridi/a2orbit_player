@@ -28,14 +28,9 @@ class AppTheme {
     final amoledScheme = baseScheme.copyWith(
       background: AppColors.amoledBackground,
       surface: AppColors.amoledSurface,
+      surfaceVariant: AppColors.amoledSurface,
     );
-    return _baseTheme(amoledScheme, data).copyWith(
-      scaffoldBackgroundColor: AppColors.amoledBackground,
-      colorScheme: amoledScheme,
-      appBarTheme: _appBarTheme(amoledScheme, data),
-      bottomNavigationBarTheme: _bottomNavigationTheme(amoledScheme),
-      cardTheme: _cardTheme(amoledScheme),
-    );
+    return _baseTheme(amoledScheme, data);
   }
 
   static ThemeData _baseTheme(ColorScheme colorScheme, AppThemeData data) {
@@ -45,22 +40,21 @@ class AppTheme {
 
     if (data.style == ThemeStyle.ahs && data.ahsColor != null) {
       final ahsColor = data.ahsColor!;
+      final isLight = ahsColor.computeLuminance() > 0.5;
+      final contentColor = isLight ? Colors.black : Colors.white;
+
       finalScaffoldColor = ahsColor;
       finalColorScheme = colorScheme.copyWith(
         background: ahsColor,
-        surface: ahsColor, // Assuming cards/surfaces also match
-        onBackground: ahsColor.computeLuminance() > 0.5
-            ? Colors.black
-            : Colors.white,
-        onSurface: ahsColor.computeLuminance() > 0.5
-            ? Colors.black
-            : Colors.white,
+        surface: ahsColor,
+        surfaceVariant: ahsColor.withOpacity(0.8),
+        onBackground: contentColor,
+        onSurface: contentColor,
+        onSurfaceVariant: contentColor.withOpacity(0.7),
       );
       finalAppBarTheme = finalAppBarTheme.copyWith(
         backgroundColor: ahsColor,
-        foregroundColor: ahsColor.computeLuminance() > 0.5
-            ? Colors.black
-            : Colors.white,
+        foregroundColor: contentColor,
       );
     }
 
@@ -69,49 +63,49 @@ class AppTheme {
       colorScheme: finalColorScheme,
       scaffoldBackgroundColor: finalScaffoldColor,
       appBarTheme: finalAppBarTheme,
-      bottomNavigationBarTheme: _bottomNavigationTheme(colorScheme),
-      cardTheme: _cardTheme(colorScheme),
+      bottomNavigationBarTheme: _bottomNavigationTheme(finalColorScheme),
+      cardTheme: _cardTheme(finalColorScheme),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: colorScheme.primary,
-          foregroundColor: colorScheme.onPrimary,
+          backgroundColor: finalColorScheme.primary,
+          foregroundColor: finalColorScheme.onPrimary,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
         ),
       ),
-      iconTheme: IconThemeData(color: colorScheme.onSurface),
-      textTheme: _textTheme(colorScheme),
+      iconTheme: IconThemeData(color: finalColorScheme.onSurface),
+      textTheme: _textTheme(finalColorScheme),
       sliderTheme: SliderThemeData(
-        activeTrackColor: colorScheme.primary,
-        inactiveTrackColor: colorScheme.primary.withOpacity(0.25),
-        thumbColor: colorScheme.primary,
-        overlayColor: colorScheme.primary.withOpacity(0.12),
+        activeTrackColor: finalColorScheme.primary,
+        inactiveTrackColor: finalColorScheme.primary.withOpacity(0.25),
+        thumbColor: finalColorScheme.primary,
+        overlayColor: finalColorScheme.primary.withOpacity(0.12),
       ),
       switchTheme: SwitchThemeData(
         thumbColor: MaterialStateProperty.resolveWith((states) {
           if (states.contains(MaterialState.selected)) {
-            return colorScheme.primary;
+            return finalColorScheme.primary;
           }
-          return colorScheme.onSurfaceVariant;
+          return finalColorScheme.onSurfaceVariant;
         }),
         trackColor: MaterialStateProperty.resolveWith((states) {
           if (states.contains(MaterialState.selected)) {
-            return colorScheme.primaryContainer;
+            return finalColorScheme.primaryContainer;
           }
-          return colorScheme.onSurface.withOpacity(0.15);
+          return finalColorScheme.onSurface.withOpacity(0.15);
         }),
       ),
       listTileTheme: ListTileThemeData(
-        iconColor: colorScheme.primary,
-        textColor: colorScheme.onSurface,
+        iconColor: finalColorScheme.primary,
+        textColor: finalColorScheme.onSurface,
       ),
       chipTheme: ChipThemeData(
-        backgroundColor: colorScheme.primary.withOpacity(0.12),
-        selectedColor: colorScheme.primary.withOpacity(0.2),
-        labelStyle: TextStyle(color: colorScheme.onSurface),
-        secondaryLabelStyle: TextStyle(color: colorScheme.onSurface),
+        backgroundColor: finalColorScheme.primary.withOpacity(0.12),
+        selectedColor: finalColorScheme.primary.withOpacity(0.2),
+        labelStyle: TextStyle(color: finalColorScheme.onSurface),
+        secondaryLabelStyle: TextStyle(color: finalColorScheme.onSurface),
       ),
     );
   }

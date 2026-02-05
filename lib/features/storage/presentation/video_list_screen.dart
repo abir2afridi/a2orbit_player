@@ -99,7 +99,7 @@ class _VideoListScreenState extends ConsumerState<VideoListScreen> {
                   Text(
                     '${_filteredVideos.length} video${_filteredVideos.length != 1 ? 's' : ''}',
                     style: TextStyle(
-                      color: Colors.grey[600],
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                       fontSize: 14,
                       fontWeight: FontWeight.w500,
                     ),
@@ -211,7 +211,10 @@ class _VideoListScreenState extends ConsumerState<VideoListScreen> {
             const SizedBox(height: 4),
             Text(
               fileSize,
-              style: TextStyle(color: Colors.grey[600], fontSize: 12),
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontSize: 12,
+              ),
             ),
           ],
         ),
@@ -299,7 +302,9 @@ class _VideoListScreenState extends ConsumerState<VideoListScreen> {
                           child: Text(
                             fileSize,
                             style: TextStyle(
-                              color: Colors.grey[600],
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurfaceVariant,
                               fontSize: 10,
                             ),
                           ),

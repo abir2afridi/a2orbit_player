@@ -450,10 +450,10 @@ class _RobustVideoPlayerWidgetState
     _AspectCycleEntry('fit', null),
     _AspectCycleEntry('stretch', null),
     _AspectCycleEntry('crop', null),
-    _AspectCycleEntry('ratio', 1.0),
-    _AspectCycleEntry('ratio', 4.0 / 3.0),
-    _AspectCycleEntry('ratio', 16.0 / 9.0),
-    _AspectCycleEntry('ratio', null),
+    _AspectCycleEntry('1:1', 1.0),
+    _AspectCycleEntry('4:3', 4 / 3),
+    _AspectCycleEntry('16:9', 16 / 9),
+    // 'ratio' (Custom) removed from cycle - only accessible via menu
   ];
 
   static const String _playerBrightnessKey = 'player_brightness';
@@ -1044,6 +1044,9 @@ class _RobustVideoPlayerWidgetState
 
   @override
   void dispose() {
+    // Reset app orientation to portrait when player is disposed
+    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+
     WidgetsBinding.instance.removeObserver(this);
     _hideControlsTimer?.cancel();
     _progressSaveTimer?.cancel();

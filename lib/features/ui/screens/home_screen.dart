@@ -82,7 +82,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         Text(
                           'A2Orbit Player',
                           style: GoogleFonts.raleway(
-                            color: Theme.of(context).colorScheme.onSurface,
+                            color: Theme.of(
+                              context,
+                            ).appBarTheme.foregroundColor,
                             fontWeight: FontWeight.bold,
                             fontSize: 22,
                           ),
@@ -92,7 +94,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           style: TextStyle(
                             color: Theme.of(
                               context,
-                            ).colorScheme.onSurface.withOpacity(0.6),
+                            ).appBarTheme.foregroundColor?.withOpacity(0.6),
                             fontWeight: FontWeight.normal,
                             fontSize: 14,
                           ),
@@ -106,7 +108,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     Icons.cast,
                     color: Theme.of(
                       context,
-                    ).colorScheme.onSurface.withOpacity(0.6),
+                    ).appBarTheme.foregroundColor?.withOpacity(0.6),
                   ),
                 ),
                 IconButton(
@@ -123,7 +125,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     _isSearching ? Icons.close : Icons.search,
                     color: Theme.of(
                       context,
-                    ).colorScheme.onSurface.withOpacity(0.6),
+                    ).appBarTheme.foregroundColor?.withOpacity(0.6),
                   ),
                 ),
                 IconButton(
@@ -134,7 +136,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         : Icons.list,
                     color: Theme.of(
                       context,
-                    ).colorScheme.onSurface.withOpacity(0.6),
+                    ).appBarTheme.foregroundColor?.withOpacity(0.6),
                   ),
                   tooltip: 'View Settings',
                 ),
@@ -151,7 +153,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     Icons.person_outline,
                     color: Theme.of(
                       context,
-                    ).colorScheme.onSurface.withOpacity(0.6),
+                    ).appBarTheme.foregroundColor?.withOpacity(0.6),
                   ),
                 ),
               ],

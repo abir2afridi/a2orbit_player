@@ -411,7 +411,7 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
           'Folders (${_filteredFolderPaths.length})',
           style: TextStyle(
             fontWeight: FontWeight.bold,
-            color: Theme.of(context).colorScheme.onSurface,
+            color: Theme.of(context).appBarTheme.foregroundColor,
           ),
         ),
         elevation: 0,
@@ -566,7 +566,7 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
             Text(
               '$videoCount video${videoCount != 1 ? 's' : ''}',
               style: TextStyle(
-                color: Colors.grey[600],
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
                 fontSize: 14,
                 fontWeight: FontWeight.w500,
               ),
@@ -574,7 +574,12 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
             const SizedBox(height: 2),
             Text(
               _getShortPath(folderPath),
-              style: TextStyle(color: Colors.grey[500], fontSize: 12),
+              style: TextStyle(
+                color: Theme.of(
+                  context,
+                ).colorScheme.onSurfaceVariant.withOpacity(0.7),
+                fontSize: 12,
+              ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -676,7 +681,7 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
                     Text(
                       '$videoCount video${videoCount != 1 ? 's' : ''}',
                       style: TextStyle(
-                        color: Colors.grey[600],
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                         fontSize: 12,
                         fontWeight: FontWeight.w500,
                       ),
@@ -752,7 +757,10 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
         ),
         subtitle: Text(
           fileSize,
-          style: TextStyle(color: Colors.grey[600], fontSize: 12),
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            fontSize: 12,
+          ),
         ),
         onTap: () => _playVideo(video),
       ),

@@ -29,7 +29,6 @@ class _MusicScreenState extends State<MusicScreen>
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.background,
       appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.surface,
         elevation: 0,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -38,7 +37,7 @@ class _MusicScreenState extends State<MusicScreen>
             Text(
               'A2Orbit Player',
               style: GoogleFonts.raleway(
-                color: Theme.of(context).colorScheme.onSurface,
+                color: Theme.of(context).appBarTheme.foregroundColor,
                 fontWeight: FontWeight.bold,
                 fontSize: 22,
               ),
@@ -46,7 +45,9 @@ class _MusicScreenState extends State<MusicScreen>
             Text(
               'Music',
               style: TextStyle(
-                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                color: Theme.of(
+                  context,
+                ).appBarTheme.foregroundColor?.withOpacity(0.6),
                 fontWeight: FontWeight.normal,
                 fontSize: 14,
               ),
@@ -58,7 +59,7 @@ class _MusicScreenState extends State<MusicScreen>
             onPressed: () {},
             icon: Icon(
               Icons.more_vert,
-              color: Theme.of(context).colorScheme.onSurface,
+              color: Theme.of(context).appBarTheme.foregroundColor,
             ),
           ),
         ],

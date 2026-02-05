@@ -14,7 +14,6 @@ class TransferScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.background,
       appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.surface,
         elevation: 0,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -23,7 +22,7 @@ class TransferScreen extends ConsumerWidget {
             Text(
               'A2Orbit Player',
               style: GoogleFonts.raleway(
-                color: Theme.of(context).colorScheme.onSurface,
+                color: Theme.of(context).appBarTheme.foregroundColor,
                 fontWeight: FontWeight.bold,
                 fontSize: 22,
               ),
@@ -31,7 +30,9 @@ class TransferScreen extends ConsumerWidget {
             Text(
               'Transfer',
               style: TextStyle(
-                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                color: Theme.of(
+                  context,
+                ).appBarTheme.foregroundColor?.withOpacity(0.6),
                 fontWeight: FontWeight.normal,
                 fontSize: 14,
               ),
@@ -43,14 +44,14 @@ class TransferScreen extends ConsumerWidget {
             onPressed: () {},
             icon: Icon(
               Icons.person_add_outlined,
-              color: Theme.of(context).colorScheme.onSurface,
+              color: Theme.of(context).appBarTheme.foregroundColor,
             ),
           ),
           IconButton(
             onPressed: () {},
             icon: Icon(
               Icons.more_vert,
-              color: Theme.of(context).colorScheme.onSurface,
+              color: Theme.of(context).appBarTheme.foregroundColor,
             ),
           ),
         ],

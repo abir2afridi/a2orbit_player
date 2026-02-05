@@ -20,19 +20,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.background,
       appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.surface,
         elevation: 0,
         leading: IconButton(
           icon: Icon(
             Icons.arrow_back,
-            color: Theme.of(context).colorScheme.onSurface,
+            color: Theme.of(context).appBarTheme.foregroundColor,
           ),
           onPressed: () => Navigator.of(context).pop(),
         ),
         title: Text(
           'Settings',
           style: GoogleFonts.raleway(
-            color: Theme.of(context).colorScheme.onSurface,
+            color: Theme.of(context).appBarTheme.foregroundColor,
             fontWeight: FontWeight.bold,
             fontSize: 22,
           ),
@@ -161,19 +160,18 @@ class _DetailedSettingsScreenState
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.background,
       appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.surface,
         elevation: 0,
         leading: IconButton(
           icon: Icon(
             Icons.arrow_back,
-            color: Theme.of(context).colorScheme.onSurface,
+            color: Theme.of(context).appBarTheme.foregroundColor,
           ),
           onPressed: () => Navigator.of(context).pop(),
         ),
         title: Text(
           widget.category,
           style: GoogleFonts.raleway(
-            color: Theme.of(context).colorScheme.onSurface,
+            color: Theme.of(context).appBarTheme.foregroundColor,
             fontWeight: FontWeight.bold,
             fontSize: 22,
           ),
